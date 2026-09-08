@@ -15,9 +15,10 @@ const P = {
   red:     "#E21D38",
   gold:    "#FFC300",
   steel:   "#A9C2DC",
-  tile:    "#F2E8C4",
-  tileShadow:"#C9A84C",
-  brown:   "#6B4226",
+  tile:    "#F5E6B8",
+  tileEdge:"#B8860B",
+  tileShadow:"#8B6914",
+  brown:   "#3D2B00",
   white:   "#FFFFFF",
   text:    "#e8e8f0",
   muted:   "rgba(255,255,255,0.4)",
@@ -650,11 +651,62 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
 
   const CELL = 38;
 
+  const [showResign, setShowResign] = useState(false);
+  const [showBag, setShowBag] = useState(false);
+
+  // Compute remaining tiles in bag
+  const bagCounts = {};
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").forEach(l => { bagCounts[l] = 0; });
+  (game.bag || []).forEach(l => { if (bagCounts[l] !== undefined) bagCounts[l]++; });
+
+  async function resign() {
+    await supabase.from("games").update({ status:"finished", winner: players.filter(p=>p.id!==myPlayer?.id).sort((a,b)=>(scores[b.id]||0)-(scores[a.id]||0))[0]?.id }).eq("id",gameId);
+    await supabase.from("moves").insert({ id:generateId(), game_id:gameId, player_id:myPlayer?.id, tiles_placed:{}, words_formed:[], score:0, move_type:"resign" });
+    onBack();
+  }
+
   return (
     <div style={{ minHeight:"100vh", background:P.bg, fontFamily:"'Segoe UI', sans-serif" }}>
+      {/* Resign confirm modal */}
+      {showResign && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.7)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:100 }}>
+          <div style={{ background:P.surface, border:`1px solid ${P.border}`, borderRadius:16, padding:28, maxWidth:320, textAlign:"center" }}>
+            <div style={{ fontSize:18, fontWeight:700, color:P.text, marginBottom:8 }}>Resign game?</div>
+            <div style={{ fontSize:14, color:P.muted, marginBottom:24 }}>This will end the game for everyone.</div>
+            <div style={{ display:"flex", gap:8, justifyContent:"center" }}>
+              <button style={styles.btnSecondary} onClick={()=>setShowResign(false)}>Cancel</button>
+              <button style={{ ...styles.btnPrimary, background:P.red }} onClick={resign}>Resign</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bag modal */}
+      {showBag && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.7)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:100 }}>
+          <div style={{ background:P.surface, border:`1px solid ${P.border}`, borderRadius:16, padding:24, maxWidth:360, width:"90%" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <div style={{ fontSize:16, fontWeight:700, color:P.text }}>Tile Bag ({(game.bag||[]).length} remaining)</div>
+              <button style={{ background:"none", border:"none", color:P.muted, cursor:"pointer", fontSize:20 }} onClick={()=>setShowBag(false)}>×</button>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(6, 1fr)", gap:6 }}>
+              {"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map(l => (
+                <div key={l} style={{ background:bagCounts[l]>0?P.tile:"rgba(255,255,255,0.05)", border:`1px solid ${bagCounts[l]>0?P.tileEdge:P.border}`, borderRadius:6, padding:"6px 4px", textAlign:"center" }}>
+                  <div style={{ fontSize:14, fontWeight:800, color:bagCounts[l]>0?P.brown:P.muted, fontFamily:"'Segoe UI', sans-serif" }}>{l}</div>
+                  <div style={{ fontSize:10, color:bagCounts[l]>0?P.brown:P.muted, fontWeight:700 }}>{bagCounts[l]}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
-      <div style={{ background:P.surface, borderBottom:`1px solid ${P.border}`, padding:"10px 16px", display:"flex", alignItems:"center", gap:12 }}>
+      <div style={{ background:P.surface, borderBottom:`1px solid ${P.border}`, padding:"10px 16px", display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
         <button style={styles.backBtn} onClick={onBack}>← Leave</button>
+        <button style={{ ...styles.btnSecondary, fontSize:12, padding:"6px 12px" }} onClick={()=>setShowBag(true)}>
+          🎲 Bag ({(game.bag||[]).length})
+        </button>
         <div style={{ flex:1 }} />
         {players.map(p => (
           <div key={p.id} style={{ display:"flex", alignItems:"center", gap:6, padding:"4px 10px", borderRadius:20, background:game.current_player===p.id?`${p.color}22`:"transparent", border:game.current_player===p.id?`1px solid ${p.color}`:"1px solid transparent" }}>
@@ -663,6 +715,9 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
             <span style={{ fontSize:13, fontWeight:700, color:P.gold }}>{scores[p.id]||0}</span>
           </div>
         ))}
+        <button style={{ ...styles.btnSecondary, fontSize:12, padding:"6px 12px", borderColor:P.red, color:P.red }} onClick={()=>setShowResign(true)}>
+          🏳 Resign
+        </button>
       </div>
 
       <div style={{ display:"flex", flexDirection:"column", alignItems:"center", padding:"16px 8px" }}>
@@ -684,7 +739,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                 const canDrop = !permanentTile && !placedTile;
                 return (
                   <div key={key}
-                    style={{ width:CELL, height:CELL, background:permanentTile||placedTile?P.tile:sq.bg, display:"flex", alignItems:"center", justifyContent:"center", cursor:isMyTurn&&canDrop&&isSelected?"pointer":"default", position:"relative", fontSize:9, fontWeight:800, color:sq.color, borderRadius:3, transition:"all 0.15s", outline:placedTile?`2px solid ${P.gold}`:"none", boxShadow:placedTile?`0 0 8px ${P.gold}44`:"none" }}
+                    style={{ width:CELL, height:CELL, background:permanentTile||placedTile?P.tile:sq.bg, display:"flex", alignItems:"center", justifyContent:"center", cursor:isMyTurn&&canDrop&&isSelected?"pointer":"default", position:"relative", fontSize:11, fontWeight:900, color:sq.color, borderRadius:3, transition:"all 0.15s", outline:placedTile?`2px solid ${P.gold}`:"none", boxShadow:placedTile?`0 0 8px ${P.gold}44`:"none", letterSpacing:-0.5 }}
                     onClick={() => isMyTurn && handleSquareClick(r,c)}
                     onDragOver={isMyTurn ? handleDragOver : undefined}
                     onDrop={isMyTurn ? (e)=>handleDropOnSquare(e,r,c) : undefined}
@@ -692,17 +747,17 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                     onDragStart={isMyTurn && placedTile ? ()=>handleDragFromBoard(r,c) : undefined}
                   >
                     {permanentTile ? (
-                      <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
-                        <span style={{ fontSize:14, fontWeight:900, color:P.brown, fontFamily:"Georgia, serif" }}>{permanentTile=="_"?"":permanentTile}</span>
-                        <span style={{ fontSize:7, color:P.brown, lineHeight:1 }}>{TILE_VALUES[permanentTile]||""}</span>
+                      <div style={{ width:CELL-4, height:CELL-4, background:P.tile, borderRadius:3, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", border:`1px solid ${P.tileEdge}`, boxShadow:`inset 0 1px 0 rgba(255,255,255,0.5)` }}>
+                        <span style={{ fontSize:15, fontWeight:800, color:P.brown, fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1 }}>{permanentTile==="_"?"":permanentTile}</span>
+                        <span style={{ fontSize:7, color:P.brown, lineHeight:1, fontWeight:700 }}>{TILE_VALUES[permanentTile]||""}</span>
                       </div>
                     ) : placedTile ? (
-                      <div style={{ display:"flex", flexDirection:"column", alignItems:"center", cursor:"pointer" }} onClick={()=>isMyTurn&&handleSquareClick(r,c)}>
-                        <span style={{ fontSize:14, fontWeight:900, color:P.brown, fontFamily:"Georgia, serif" }}>{placedTile.letter=="_"?"":placedTile.letter}</span>
-                        <span style={{ fontSize:7, color:P.brown, lineHeight:1 }}>{TILE_VALUES[placedTile.letter]||""}</span>
+                      <div style={{ width:CELL-4, height:CELL-4, background:"#FFF3CC", borderRadius:3, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:"pointer", border:`1px solid ${P.gold}`, boxShadow:`inset 0 1px 0 rgba(255,255,255,0.7), 0 0 6px ${P.gold}66` }} onClick={()=>isMyTurn&&handleSquareClick(r,c)}>
+                        <span style={{ fontSize:15, fontWeight:800, color:P.brown, fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1 }}>{placedTile.letter==="_"?"":placedTile.letter}</span>
+                        <span style={{ fontSize:7, color:P.brown, lineHeight:1, fontWeight:700 }}>{TILE_VALUES[placedTile.letter]||""}</span>
                       </div>
                     ) : (
-                      <span style={{ fontSize:8, color:sq.color, opacity:0.9, fontWeight:800 }}>{sq.label}</span>
+                      <span style={{ fontSize:11, color:sq.color, fontWeight:900, letterSpacing:-0.5 }}>{sq.label}</span>
                     )}
                   </div>
                 );
@@ -723,12 +778,13 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                   draggable={isMyTurn && !swapMode}
                   onDragStart={isMyTurn&&!swapMode ? (e)=>{ e.dataTransfer.effectAllowed="move"; handleDragStart(idx); } : undefined}
                   onClick={()=>{ if (!isMyTurn) return; if (swapMode) toggleSwapSelect(idx); else handleTileClick(idx); }}
-                  style={{ width:44, height:44, background:isSwapSel?"#444":P.tile, borderRadius:6, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:isMyTurn?"pointer":"default",
-                    boxShadow:isSwapSel?`0 0 0 3px ${P.red}, 0 3px 0 ${P.tileShadow}`:isPlaceSel?`0 0 0 3px ${P.gold}, 0 3px 0 ${P.tileShadow}`:`0 3px 0 ${P.tileShadow}`,
-                    transform:isSwapSel||isPlaceSel?"translateY(-4px)":"none", transition:"all 0.1s",
-                    opacity:!swapMode&&selectedTile!==null&&!isPlaceSel?0.6:1 }}>
-                  <span style={{ fontSize:18, fontWeight:900, color:isSwapSel?P.muted:P.brown, fontFamily:"Georgia, serif", lineHeight:1 }}>{letter==="_"?"":letter}</span>
-                  <span style={{ fontSize:9, color:isSwapSel?P.muted:P.brown }}>{TILE_VALUES[letter]||""}</span>
+                  style={{ width:46, height:46, background:isSwapSel?"#555":P.tile, borderRadius:5, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:isMyTurn?"pointer":"default",
+                    border:`1px solid ${isSwapSel?P.red:isPlaceSel?P.gold:P.tileEdge}`,
+                    boxShadow:isSwapSel?`inset 0 1px 0 rgba(255,255,255,0.2), 0 0 0 2px ${P.red}, 0 4px 0 #444`:isPlaceSel?`inset 0 1px 0 rgba(255,255,255,0.6), 0 0 0 2px ${P.gold}, 0 4px 0 ${P.tileShadow}`:`inset 0 1px 0 rgba(255,255,255,0.6), inset 0 -2px 0 ${P.tileEdge}, 0 4px 0 ${P.tileShadow}`,
+                    transform:isSwapSel||isPlaceSel?"translateY(-5px)":"none", transition:"all 0.1s",
+                    opacity:!swapMode&&selectedTile!==null&&!isPlaceSel?0.5:1 }}>
+                  <span style={{ fontSize:20, fontWeight:800, color:isSwapSel?"#aaa":P.brown, fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1 }}>{letter==="_"?"":letter}</span>
+                  <span style={{ fontSize:9, color:isSwapSel?"#aaa":P.brown, fontWeight:700 }}>{TILE_VALUES[letter]||""}</span>
                 </div>
               );
             })}
@@ -806,6 +862,8 @@ function MoveHistory({ gameId, players }) {
                 <span style={{ color:P.muted }}>passed</span>
               ) : m.move_type==="swap" ? (
                 <span style={{ color:P.muted }}>swapped tiles</span>
+              ) : m.move_type==="resign" ? (
+                <span style={{ color:P.red }}>resigned</span>
               ) : (
                 <>
                   <span style={{ color:P.muted }}>played</span>
@@ -828,7 +886,7 @@ const styles = {
   notification: { position:"fixed", top:16, left:"50%", transform:"translateX(-50%)", padding:"10px 24px", borderRadius:30, fontWeight:700, fontSize:14, color:P.white, zIndex:9999 },
   hero: { textAlign:"center", padding:"48px 0 40px" },
   heroTiles: { display:"flex", justifyContent:"center", gap:6, marginBottom:20 },
-  heroTile: { width:44, height:44, background:P.tile, borderRadius:6, display:"flex", alignItems:"center", justifyContent:"center", fontWeight:900, fontSize:22, color:P.brown, boxShadow:`0 3px 0 ${P.tileShadow}, 0 4px 8px rgba(0,0,0,0.5)`, fontFamily:"Georgia, serif" },
+  heroTile: { width:44, height:44, background:P.tile, borderRadius:5, display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontSize:22, color:P.brown, boxShadow:`inset 0 1px 0 rgba(255,255,255,0.6), inset 0 -2px 0 ${P.tileEdge}, 0 4px 8px rgba(0,0,0,0.5)`, fontFamily:"'Segoe UI', Arial, sans-serif", border:`1px solid ${P.tileEdge}` },
   heroSub: { color:P.muted, fontSize:15, margin:0 },
   card: { background:P.surface, border:`1px solid ${P.border}`, borderRadius:16, padding:"20px 18px", marginBottom:16 },
   label: { fontSize:11, color:P.steel, fontWeight:600, letterSpacing:2, display:"block", marginBottom:8, textTransform:"uppercase" },
