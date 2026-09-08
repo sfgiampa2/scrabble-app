@@ -239,7 +239,7 @@ export default function App() {
   }
 
   async function createGame(hostName) {
-    const name = hostName?.trim() || profile?.name || "Player";
+    const name = profile?.name || hostName?.trim() || "Player";
     setLoading(true);
     const id = generateId();
     const playerId = generateId();
@@ -252,9 +252,17 @@ export default function App() {
     setLoading(false); setViewBoth("lobby");
   }
 
-  async function joinGame(playerName) {
+  async function joinGame(playerName, customGameId) {
+    const name = profile?.name || playerName?.trim() || "Player";
+    playerName = name;
+    const targetGameId = customGameId || gameId;
     if (!playerName.trim()) return notify("Enter your name","error");
-    if (!gameId) return notify("No game found","error");
+    if (!targetGameId) return notify("No game found","error");
+    if (customGameId && customGameId !== gameId) {
+      setGameId(customGameId);
+      gameIdRef.current = customGameId;
+      window.history.pushState({}, "", `?game=${customGameId}`);
+    }
     setLoading(true);
     const { data: gd } = await supabase.from("games").select("*").eq("id", gameId).single();
     if (!gd) { notify("Game not found","error"); setLoading(false); return; }
@@ -296,8 +304,8 @@ export default function App() {
           {notification.msg}
         </div>
       )}
-      {view==="home"  && <HomeView onCreate={createGame} loading={loading} profile={profile} onSignOut={signOut} onProfile={()=>setViewBoth("profile")} />}
-      {view==="join"  && <JoinView gameId={gameId} onJoin={joinGame} loading={loading} />}
+      {view==="home"  && <HomeView onCreate={createGame} loading={loading} profile={profile} onSignOut={signOut} onProfile={()=>setViewBoth("profile")} onJoinCode={()=>setViewBoth("join")} />}
+      {view==="join"  && <JoinView gameId={gameId} onJoin={joinGame} loading={loading} profile={profile} />}
       {view==="lobby" && game && <LobbyView game={game} players={players} myPlayer={myPlayer} gameId={gameId} onStart={startGame} onBack={leaveGame} notify={notify} />}
       {view==="profile" && <ProfileView profile={profile} setProfile={setProfile} userId={user?.id} onBack={()=>setViewBoth("home")} />}
       {view==="game"  && game && <GameBoard game={game} players={players} myPlayer={myPlayer} gameId={gameId} notify={notify} onBack={leaveGame} />}
@@ -306,7 +314,7 @@ export default function App() {
 }
 
 // ─── HOME ─────────────────────────────────────────────────────────────────────
-function HomeView({ onCreate, loading, profile, onSignOut, onProfile }) {
+function HomeView({ onCreate, loading, profile, onSignOut, onProfile, onJoinCode }) {
   const [name, setName] = useState("");
   return (
     <div style={styles.page}>
@@ -334,7 +342,12 @@ function HomeView({ onCreate, loading, profile, onSignOut, onProfile }) {
           {loading ? "Creating…" : "Create New Game"}
         </button>
       </div>
-      <div style={styles.divider}><span>or join with a link from your host</span></div>
+      <div style={styles.divider}><span>or</span></div>
+      <div style={styles.card}>
+        <button style={{ ...styles.btnSecondary, width:"100%", fontSize:15 }} onClick={onJoinCode}>
+          Join with Game Code
+        </button>
+      </div>
     </div>
   );
 }
@@ -503,6 +516,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
       setMyRack(newRack);
       setPlaced({ ...placed, [key]: { letter } });
       setSelectedTile(null);
+      playSound("place");
       if (letter === "_") setBlankPicker({ row, col });
     }
   }
@@ -548,6 +562,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     setPlaced({ ...placed, [key]: { letter } });
     setDragTile(null);
     setSelectedTile(null);
+    playSound("place");
     if (letter === "_") setBlankPicker({ row, col });
   }
 
@@ -570,6 +585,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     setMyRack([...myRack, ...letters]);
     setPlaced({});
     setSelectedTile(null);
+    playSound("recall");
   }
 
   function getPlacedWords() {
@@ -728,6 +744,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     setPlaced({});
     setValidating(false);
     notify(`+${score} points! ${words.map(w=>w.word).join(", ")}`);
+    playSound("play");
   }
 
   async function passTurn() {
@@ -738,9 +755,16 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     notify("Turn passed");
   }
 
-  const CELL = 40;
+  const CELL = 42;
 
   const [showResign, setShowResign] = useState(false);
+  const [soundOn, setSoundOn] = useState(localStorage.getItem("scrabbleSoundOff") !== "true");
+
+  function toggleSound() {
+    const next = !soundOn;
+    setSoundOn(next);
+    localStorage.setItem("scrabbleSoundOff", next ? "false" : "true");
+  }
 
   // Compute remaining tiles in bag
   const bagCounts = {};
@@ -748,10 +772,17 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
   (game.bag || []).forEach(l => { if (bagCounts[l] !== undefined) bagCounts[l]++; });
 
   async function resign() {
-    await supabase.from("games").update({ status:"finished", winner: players.filter(p=>p.id!==myPlayer?.id).sort((a,b)=>(scores[b.id]||0)-(scores[a.id]||0))[0]?.id }).eq("id",gameId);
+    await supabase.from("games").update({ status:"finished" }).eq("id",gameId);
     await supabase.from("moves").insert({ id:generateId(), game_id:gameId, player_id:myPlayer?.id, tiles_placed:{}, words_formed:[], score:0, move_type:"resign" });
-    onBack();
   }
+
+  // Watch for game finished
+  useEffect(() => {
+    if (game.status === "finished") {
+      notify(`Game over! ${players.sort((a,b)=>(scores[b.id]||0)-(scores[a.id]||0))[0]?.name} wins!`);
+      setTimeout(() => onBack(), 3000);
+    }
+  }, [game.status]);
 
   return (
     <div style={{ minHeight:"100vh", background:P.bg, fontFamily:"'Segoe UI', sans-serif" }}>
@@ -814,6 +845,9 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
             <span style={{ fontSize:13, fontWeight:700, color:P.gold }}>{scores[p.id]||0}</span>
           </div>
         ))}
+        <button style={{ ...styles.btnSecondary, fontSize:12, padding:"6px 12px" }} onClick={toggleSound}>
+          {soundOn ? "🔊" : "🔇"}
+        </button>
         <button style={{ ...styles.btnSecondary, fontSize:12, padding:"6px 12px", borderColor:P.red, color:P.red }} onClick={()=>setShowResign(true)}>
           🏳 Resign
         </button>
@@ -848,7 +882,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
             const minR = Math.min(...squares.map(s=>s.r));
             const minC = Math.min(...squares.map(s=>s.c));
             const maxC = Math.max(...squares.map(s=>s.c));
-            const CELL = 40;
+            const CELL = 42;
             const left = minC * (CELL+1) + 3;
             const top = minR * (CELL+1) + 3 - 22;
             const width = (maxC - minC + 1) * (CELL+1) - 1;
@@ -886,13 +920,17 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                   >
                     {permanentTile ? (
                       <div style={{ width:CELL-4, height:CELL-4, background:P.tile, borderRadius:3, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", border:`1px solid ${P.tileEdge}`, boxShadow:`inset 0 1px 0 rgba(255,255,255,0.5)` }}>
-                        <span style={{ fontSize:15, fontWeight:800, color:P.brown, fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1 }}>{permanentTile==="_"?"":permanentTile}</span>
+                        <span style={{ fontSize:15, fontWeight:800, color:"#888", fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1, fontStyle:permanentTile==="_"?"italic":"normal" }}>
+                          {permanentTile==="_" ? (board[key+"_letter"]||"") : permanentTile}
+                        </span>
                         <span style={{ fontSize:7, color:P.brown, lineHeight:1, fontWeight:700 }}>{TILE_VALUES[permanentTile]||""}</span>
                       </div>
                     ) : placedTile ? (
                       <div style={{ width:CELL-4, height:CELL-4, background:"#FFF3CC", borderRadius:3, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:"pointer", border:`1px solid ${P.gold}`, boxShadow:`inset 0 1px 0 rgba(255,255,255,0.7), 0 0 6px ${P.gold}66` }} onClick={()=>isMyTurn&&handleSquareClick(r,c)}>
-                        <span style={{ fontSize:15, fontWeight:800, color:P.brown, fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1 }}>{placedTile.letter==="_"?"":placedTile.letter}</span>
-                        <span style={{ fontSize:7, color:P.brown, lineHeight:1, fontWeight:700 }}>{TILE_VALUES[placedTile.letter]||""}</span>
+                        <span style={{ fontSize:15, fontWeight:800, color:P.brown, fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1 }}>
+                          {placedTile.letter==="_" ? (blankAssignments[key]||"?") : placedTile.letter}
+                        </span>
+                        <span style={{ fontSize:7, color:P.brown, lineHeight:1, fontWeight:700 }}>{placedTile.letter==="_"?"0":TILE_VALUES[placedTile.letter]||""}</span>
                       </div>
                     ) : (
                       <span style={{ fontSize:11, color:sq.color, fontWeight:900, letterSpacing:-0.5 }}>{sq.label}</span>
@@ -907,7 +945,10 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
 
         {/* Rack */}
         <div style={{ marginTop:16, background:P.surface, border:`1px solid ${P.border}`, borderRadius:12, padding:"12px 16px", width:"100%", maxWidth:600 }}>
-          <div style={{ fontSize:11, color:P.steel, fontWeight:700, letterSpacing:2, marginBottom:10 }}>YOUR RACK</div>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+            <div style={{ fontSize:11, color:P.steel, fontWeight:700, letterSpacing:2 }}>YOUR RACK</div>
+            <div style={{ fontSize:10, color:P.muted }}>click tile then click square, or drag</div>
+          </div>
           <div style={{ display:"flex", gap:6, justifyContent:"center", flexWrap:"wrap", marginBottom:12 }}>
             {myRack.map((letter, idx) => {
               const isSwapSel = swapSelected.includes(idx);
@@ -917,7 +958,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                   draggable={!swapMode}
                   onDragStart={!swapMode ? (e)=>{ e.dataTransfer.effectAllowed="move"; handleDragStart(idx); } : undefined}
                   onClick={()=>{ if (swapMode) toggleSwapSelect(idx); else handleTileClick(idx); }}
-                  style={{ width:46, height:46, background:isSwapSel?"#555":P.tile, borderRadius:5, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:isMyTurn?"pointer":"default",
+                  style={{ width:48, height:48, background:isSwapSel?"#555":P.tile, borderRadius:5, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:"grab",
                     border:`1px solid ${isSwapSel?P.red:isPlaceSel?P.gold:P.tileEdge}`,
                     boxShadow:isSwapSel?`inset 0 1px 0 rgba(255,255,255,0.2), 0 0 0 2px ${P.red}, 0 4px 0 #444`:isPlaceSel?`inset 0 1px 0 rgba(255,255,255,0.6), 0 0 0 2px ${P.gold}, 0 4px 0 ${P.tileShadow}`:`inset 0 1px 0 rgba(255,255,255,0.6), inset 0 -2px 0 ${P.tileEdge}, 0 4px 0 ${P.tileShadow}`,
                     transform:isSwapSel||isPlaceSel?"translateY(-5px)":"none", transition:"all 0.1s",
