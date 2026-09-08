@@ -903,6 +903,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
             )}
           </div>
         </div>
+        </div>
 
         {/* Rack */}
         <div style={{ marginTop:16, background:P.surface, border:`1px solid ${P.border}`, borderRadius:12, padding:"12px 16px", width:"100%", maxWidth:600 }}>
