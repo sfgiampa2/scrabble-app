@@ -368,14 +368,17 @@ function LobbyView({ game, players, myPlayer, gameId, onStart, onBack, notify })
 function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
   const [board, setBoard] = useState(game.board || {});
   const [myRack, setMyRack] = useState([]);
-  const [placed, setPlaced] = useState({}); // { "7,7": { letter:"A", tileIdx:0 } }
-  const [selectedTile, setSelectedTile] = useState(null); // index in rack
+  const [placed, setPlaced] = useState({});
+  const [selectedTile, setSelectedTile] = useState(null);
+  const [wordStatus, setWordStatus] = useState({}); // key -> { valid, score, word }
   const [dragTile, setDragTile] = useState(null);
   const [validating, setValidating] = useState(false);
   const [scores, setScores] = useState({});
   const [gameOver, setGameOver] = useState(false);
   const [swapMode, setSwapMode] = useState(false);
-  const [swapSelected, setSwapSelected] = useState(new Set());
+  const [swapSelected, setSwapSelected] = useState([]);
+  const [blankPicker, setBlankPicker] = useState(null); // { row, col } pending blank placement
+  const [blankAssignments, setBlankAssignments] = useState({}); // key -> letter chosen for blank
   const isMyTurn = game.current_player === myPlayer?.id;
 
   // Load my rack from players — only update if not mid-play
@@ -385,6 +388,21 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
       setMyRack(me.rack);
     }
   }, [players]);
+
+  // Validate words as tiles are placed
+  useEffect(() => {
+    if (Object.keys(placed).length === 0) { setWordStatus({}); return; }
+    const words = getPlacedWords();
+    if (words.length === 0) return;
+    const statusMap = {};
+    Promise.all(words.map(async ({ word, squares }) => {
+      const valid = await isValidWord(word);
+      const score = calculateScore();
+      squares.forEach(({ r, c }) => {
+        statusMap[`${r},${c}`] = { valid, word, score };
+      });
+    })).then(() => setWordStatus(statusMap));
+  }, [placed, blankAssignments]);
 
   // Sync board from game
   useEffect(() => {
@@ -412,11 +430,15 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
       // Remove tile back to rack
       const tile = placed[key];
       const newRack = [...myRack];
-      newRack.splice(tile.rackIdx, 0, tile.letter);
+      newRack.push(tile.letter);
       setMyRack(newRack);
       const newPlaced = { ...placed };
       delete newPlaced[key];
       setPlaced(newPlaced);
+      // Clear blank assignment
+      const newBA = { ...blankAssignments };
+      delete newBA[key];
+      setBlankAssignments(newBA);
       setSelectedTile(null);
       return;
     }
@@ -425,19 +447,23 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
       const newRack = [...myRack];
       newRack.splice(selectedTile, 1);
       setMyRack(newRack);
-      setPlaced({ ...placed, [key]: { letter, rackIdx: selectedTile } });
+      setPlaced({ ...placed, [key]: { letter } });
       setSelectedTile(null);
+      if (letter === "_") setBlankPicker({ row, col });
     }
   }
 
   function handleTileClick(idx) {
-    if (!isMyTurn) return;
     setSelectedTile(selectedTile === idx ? null : idx);
   }
 
   function handleDragStart(idx) {
     setDragTile({ fromRack: true, idx });
     setSelectedTile(idx);
+  }
+
+  function shuffleRack() {
+    setMyRack(prev => [...prev].sort(() => Math.random() - 0.5));
   }
 
   function handleDropOnSquare(e, row, col) {
@@ -468,6 +494,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     setPlaced({ ...placed, [key]: { letter } });
     setDragTile(null);
     setSelectedTile(null);
+    if (letter === "_") setBlankPicker({ row, col });
   }
 
   function handleDragOver(e) { e.preventDefault(); }
@@ -493,7 +520,10 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
 
   function getPlacedWords() {
     const allTiles = { ...board };
-    Object.entries(placed).forEach(([key, t]) => { allTiles[key] = t.letter; });
+    Object.entries(placed).forEach(([key, t]) => {
+      // Use assigned letter for blanks
+      allTiles[key] = t.letter === "_" ? (blankAssignments[key] || "A") : t.letter;
+    });
     const words = [];
     const placedKeys = Object.keys(placed);
     if (placedKeys.length === 0) return [];
@@ -521,53 +551,62 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     return words;
   }
 
+  function getTileEffectiveLetter(key) {
+    // For blank tiles, use the assigned letter (but scores 0)
+    if (placed[key]?.letter === "_") return blankAssignments[key] || "A";
+    if (board[key]) return board[key] === "_" ? "A" : board[key];
+    return placed[key]?.letter || "";
+  }
+
   function calculateScore() {
-    const allTiles = { ...board };
-    Object.entries(placed).forEach(([key, t]) => { allTiles[key] = t.letter; });
-    let total = 0;
     const words = getPlacedWords();
-    words.forEach(({ word, squares }) => {
-      let wordScore = 0; let wordMult = 1;
+    let total = 0;
+    words.forEach(({ squares }) => {
+      let wordScore = 0;
+      let wordMult = 1;
       squares.forEach(({ r, c }) => {
         const key = `${r},${c}`;
-        const letter = allTiles[key] === "_" ? 0 : (TILE_VALUES[allTiles[key]] || 0);
+        const isNew = !!placed[key];
+        const letter = placed[key]?.letter === "_" ? "_" : (placed[key]?.letter || board[key]);
+        // Blank tiles always score 0
+        const letterVal = letter === "_" ? 0 : (TILE_VALUES[letter] || 0);
         const squareType = BOARD_LAYOUT[r][c];
-        const isNew = placed[key];
         if (isNew) {
-          if (squareType === "TL") wordScore += letter * 3;
-          else if (squareType === "DL") wordScore += letter * 2;
-          else wordScore += letter;
+          // Apply letter multipliers first
+          if (squareType === "TL") wordScore += letterVal * 3;
+          else if (squareType === "DL") wordScore += letterVal * 2;
+          else wordScore += letterVal;
+          // Collect word multipliers
           if (squareType === "TW" || squareType === "ST") wordMult *= 3;
           else if (squareType === "DW") wordMult *= 2;
         } else {
-          wordScore += letter;
+          wordScore += letterVal;
         }
       });
       total += wordScore * wordMult;
     });
-    // Bingo bonus
     if (Object.keys(placed).length === 7) total += 50;
     return total;
   }
 
   function toggleSwapSelect(idx) {
-    const next = new Set(swapSelected);
-    if (next.has(idx)) next.delete(idx); else next.add(idx);
-    setSwapSelected(next);
+    setSwapSelected(prev =>
+      prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]
+    );
   }
 
   async function confirmSwap() {
-    if (swapSelected.size === 0) return notify("Select tiles to swap","error");
+    if (swapSelected.length === 0) return notify("Select tiles to swap","error");
     const { data: gameData } = await supabase.from("games").select("bag").eq("id",gameId).single();
     const bag = gameData?.bag || [];
-    if (bag.length < swapSelected.size) return notify("Not enough tiles in bag","error");
+    if (bag.length < swapSelected.length) return notify("Not enough tiles in bag","error");
     // Draw new tiles
-    const { drawn, remaining } = drawTiles(bag, swapSelected.size);
+    const { drawn, remaining } = drawTiles(bag, swapSelected.length);
     // Put selected tiles back in bag (shuffled)
-    const returnedTiles = [...swapSelected].map(idx => myRack[idx]);
+    const returnedTiles = swapSelected.map(idx => myRack[idx]);
     const newBag = [...remaining, ...returnedTiles].sort(() => Math.random() - 0.5);
     // Build new rack
-    const newRack = myRack.filter((_, idx) => !swapSelected.has(idx));
+    const newRack = myRack.filter((_, idx) => !swapSelected.includes(idx));
     newRack.push(...drawn);
     // Next player
     const myIdx = players.findIndex(p=>p.id===myPlayer?.id);
@@ -576,9 +615,10 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     await supabase.from("game_players").update({ rack:newRack }).eq("id",myPlayer?.id);
     await supabase.from("moves").insert({ id:generateId(), game_id:gameId, player_id:myPlayer?.id, tiles_placed:{}, words_formed:[], score:0, move_type:"swap" });
     setMyRack(newRack);
+    const swapCount = swapSelected.length;
     setSwapMode(false);
-    setSwapSelected(new Set());
-    notify(`Swapped ${swapSelected.size} tile${swapSelected.size!==1?"s":""}!`);
+    setSwapSelected([]);
+    notify(`Swapped ${swapCount} tile${swapCount!==1?"s":""}!`);
   }
 
   async function submitPlay() {
@@ -643,7 +683,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     notify("Turn passed");
   }
 
-  const CELL = 38;
+  const CELL = 40;
 
   const [showResign, setShowResign] = useState(false);
 
@@ -660,6 +700,38 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
 
   return (
     <div style={{ minHeight:"100vh", background:P.bg, fontFamily:"'Segoe UI', sans-serif" }}>
+      {/* Blank tile letter picker */}
+      {blankPicker && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.8)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:200 }}>
+          <div style={{ background:P.surface, border:`1px solid ${P.border}`, borderRadius:16, padding:24, maxWidth:360, width:"90%" }}>
+            <div style={{ fontSize:16, fontWeight:700, color:P.text, marginBottom:4, textAlign:"center" }}>Choose a letter for blank tile</div>
+            <div style={{ fontSize:12, color:P.muted, textAlign:"center", marginBottom:16 }}>Blank tiles score 0 points</div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(7, 1fr)", gap:6 }}>
+              {"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map(l => (
+                <button key={l} onClick={() => {
+                  const key = `${blankPicker.row},${blankPicker.col}`;
+                  setBlankAssignments(prev => ({ ...prev, [key]: l }));
+                  setBlankPicker(null);
+                }} style={{ width:"100%", aspectRatio:"1", background:P.tile, border:`1px solid ${P.tileEdge}`, borderRadius:6, fontWeight:800, fontSize:16, color:P.brown, cursor:"pointer", fontFamily:"'Segoe UI', sans-serif", boxShadow:`inset 0 1px 0 rgba(255,255,255,0.5), inset 0 -2px 0 ${P.tileEdge}` }}>
+                  {l}
+                </button>
+              ))}
+            </div>
+            <button style={{ ...styles.btnSecondary, width:"100%", marginTop:12 }} onClick={() => {
+              // Cancel — return blank to rack
+              const key = `${blankPicker.row},${blankPicker.col}`;
+              const newPlaced = { ...placed };
+              if (newPlaced[key]) {
+                setMyRack(prev => [...prev, "_"]);
+                delete newPlaced[key];
+                setPlaced(newPlaced);
+              }
+              setBlankPicker(null);
+            }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
       {/* Resign confirm modal */}
       {showResign && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.7)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:100 }}>
@@ -728,7 +800,10 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                 const canDrop = !permanentTile && !placedTile;
                 return (
                   <div key={key}
-                    style={{ width:CELL, height:CELL, background:permanentTile||placedTile?P.tile:sq.bg, display:"flex", alignItems:"center", justifyContent:"center", cursor:isMyTurn&&canDrop&&isSelected?"pointer":"default", position:"relative", fontSize:11, fontWeight:900, color:sq.color, borderRadius:3, transition:"all 0.15s", outline:placedTile?`2px solid ${P.gold}`:"none", boxShadow:placedTile?`0 0 8px ${P.gold}44`:"none", letterSpacing:-0.5 }}
+                    style={{ width:CELL, height:CELL, background:permanentTile||placedTile?"#F5E6B8":sq.bg, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", position:"relative", fontSize:11, fontWeight:900, color:sq.color, borderRadius:3, transition:"all 0.15s",
+                      outline: placedTile ? `2px solid ${wordStatus[key]?.valid===true?"#27AE60":wordStatus[key]?.valid===false?"#E21D38":P.gold}` : "none",
+                      boxShadow: placedTile && wordStatus[key]?.valid===true ? "0 0 8px rgba(39,174,96,0.4)" : placedTile && wordStatus[key]?.valid===false ? "0 0 8px rgba(226,29,56,0.4)" : placedTile ? `0 0 8px ${P.gold}44` : "none",
+                      letterSpacing:-0.5 }}
                     onClick={() => isMyTurn && handleSquareClick(r,c)}
                     onDragOver={isMyTurn ? handleDragOver : undefined}
                     onDrop={isMyTurn ? (e)=>handleDropOnSquare(e,r,c) : undefined}
@@ -760,7 +835,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
           <div style={{ fontSize:11, color:P.steel, fontWeight:700, letterSpacing:2, marginBottom:10 }}>YOUR RACK</div>
           <div style={{ display:"flex", gap:6, justifyContent:"center", flexWrap:"wrap", marginBottom:12 }}>
             {myRack.map((letter, idx) => {
-              const isSwapSel = swapSelected.has(idx);
+              const isSwapSel = swapSelected.includes(idx);
               const isPlaceSel = selectedTile === idx;
               return (
                 <div key={idx}
@@ -795,8 +870,9 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
               )}
               {!swapMode && Object.keys(placed).length === 0 && (
                 <>
-                  <button style={{ ...styles.btnSecondary, fontSize:13 }} onClick={()=>setSwapMode(true)}>Swap Tiles</button>
-                  <button style={{ ...styles.btnSecondary, fontSize:13 }} onClick={passTurn}>Pass Turn</button>
+                  <button style={{ ...styles.btnSecondary, fontSize:13 }} onClick={shuffleRack}>🔀 Shuffle</button>
+                  <button style={{ ...styles.btnSecondary, fontSize:13 }} onClick={()=>setSwapMode(true)}>Swap</button>
+                  <button style={{ ...styles.btnSecondary, fontSize:13 }} onClick={passTurn}>Pass</button>
                 </>
               )}
               {swapMode && (
@@ -804,9 +880,9 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                   <div style={{ width:"100%", textAlign:"center", fontSize:12, color:P.muted, marginBottom:4 }}>
                     Select tiles to swap ({swapSelected.size} selected)
                   </div>
-                  <button style={{ ...styles.btnSecondary, fontSize:13 }} onClick={()=>{ setSwapMode(false); setSwapSelected(new Set()); }}>Cancel</button>
-                  <button style={{ ...styles.btnPrimary, fontSize:13, padding:"8px 20px", opacity:swapSelected.size===0?0.4:1 }}
-                    onClick={confirmSwap} disabled={swapSelected.size===0}>
+                  <button style={{ ...styles.btnSecondary, fontSize:13 }} onClick={()=>{ setSwapMode(false); setSwapSelected([]); }}>Cancel</button>
+                  <button style={{ ...styles.btnPrimary, fontSize:13, padding:"8px 20px", opacity:swapSelected.length===0?0.4:1 }}
+                    onClick={confirmSwap} disabled={swapSelected.length===0}>
                     Confirm Swap
                   </button>
                 </>
@@ -815,22 +891,24 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
           )}
         </div>
 
-          {/* Move history */}
-          <MoveHistory gameId={gameId} players={players} />
         </div>
-        {/* Right sidebar — scores */}
-        <div style={{ background:P.surface, border:`1px solid ${P.border}`, borderRadius:12, padding:"12px 10px", minWidth:130, flexShrink:0 }}>
+        {/* Right sidebar — scores + move history */}
+        <div style={{ background:P.surface, border:`1px solid ${P.border}`, borderRadius:12, padding:"12px 10px", width:160, flexShrink:0 }}>
           <div style={{ fontSize:10, color:P.steel, fontWeight:700, letterSpacing:2, marginBottom:10, textAlign:"center" }}>SCORES</div>
-          {players.map((p,i) => (
+          {players.map((p) => (
             <div key={p.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 6px", borderRadius:8, marginBottom:4, background:game.current_player===p.id?`${p.color}22`:"transparent", border:game.current_player===p.id?`1px solid ${p.color}33`:"1px solid transparent" }}>
               <div style={{ width:10, height:10, borderRadius:"50%", background:p.color, flexShrink:0 }} />
-              <div style={{ flex:1 }}>
-                <div style={{ fontSize:12, fontWeight:600, color:P.text }}>{p.name}</div>
-                {game.current_player===p.id && <div style={{ fontSize:9, color:p.color }}>● turn</div>}
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:12, fontWeight:600, color:P.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p.name}</div>
+                {game.current_player===p.id && <div style={{ fontSize:9, color:p.color }}>● your turn</div>}
               </div>
               <div style={{ fontSize:16, fontWeight:800, color:P.gold }}>{scores[p.id]||0}</div>
             </div>
           ))}
+          <div style={{ marginTop:12, borderTop:`1px solid ${P.border}`, paddingTop:10 }}>
+            <div style={{ fontSize:10, color:P.steel, fontWeight:700, letterSpacing:2, marginBottom:8 }}>MOVES</div>
+            <MoveHistory gameId={gameId} players={players} compact />
+          </div>
         </div>
       </div>
     </div>
@@ -838,7 +916,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
 }
 
 // ─── MOVE HISTORY ─────────────────────────────────────────────────────────────
-function MoveHistory({ gameId, players }) {
+function MoveHistory({ gameId, players, compact }) {
   const [moves, setMoves] = useState([]);
   useEffect(() => {
     supabase.from("moves").select("*").eq("game_id", gameId).order("created_at", { ascending:false }).limit(10)
@@ -850,34 +928,32 @@ function MoveHistory({ gameId, players }) {
     return () => supabase.removeChannel(ch);
   }, [gameId]);
 
-  if (moves.length === 0) return null;
+  if (moves.length === 0) return compact ? <div style={{ fontSize:11, color:P.muted }}>No moves yet</div> : null;
+
+  const moveList = moves.map(m => {
+    const player = players.find(p=>p.id===m.player_id);
+    return (
+      <div key={m.id} style={{ padding:compact?"4px 0":"6px 0", borderBottom:"1px solid rgba(255,255,255,0.05)", fontSize:compact?11:13 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <div style={{ width:6, height:6, borderRadius:"50%", background:player?.color||P.muted, flexShrink:0 }} />
+          <span style={{ color:P.text, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:compact?70:120 }}>{player?.name}</span>
+          {m.move_type==="pass" ? <span style={{ color:P.muted }}>pass</span>
+          : m.move_type==="swap" ? <span style={{ color:P.muted }}>swap</span>
+          : m.move_type==="resign" ? <span style={{ color:P.red }}>resign</span>
+          : <span style={{ color:P.gold, fontWeight:700, marginLeft:"auto" }}>+{m.score}</span>}
+        </div>
+        {m.move_type==="play" && <div style={{ fontSize:10, color:P.muted, paddingLeft:12, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{(m.words_formed||[]).join(", ")}</div>}
+      </div>
+    );
+  });
+
+  if (compact) return <div>{moveList}</div>;
 
   return (
     <div style={{ marginTop:16, width:"100%", maxWidth:600 }}>
       <div style={styles.card}>
         <div style={{ fontSize:11, color:P.steel, fontWeight:700, letterSpacing:2, marginBottom:10 }}>RECENT MOVES</div>
-        {moves.map(m => {
-          const player = players.find(p=>p.id===m.player_id);
-          return (
-            <div key={m.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderBottom:"1px solid rgba(255,255,255,0.05)", fontSize:13 }}>
-              <div style={{ width:8, height:8, borderRadius:"50%", background:player?.color||P.muted, flexShrink:0 }} />
-              <span style={{ color:P.text, fontWeight:600 }}>{player?.name}</span>
-              {m.move_type==="pass" ? (
-                <span style={{ color:P.muted }}>passed</span>
-              ) : m.move_type==="swap" ? (
-                <span style={{ color:P.muted }}>swapped tiles</span>
-              ) : m.move_type==="resign" ? (
-                <span style={{ color:P.red }}>resigned</span>
-              ) : (
-                <>
-                  <span style={{ color:P.muted }}>played</span>
-                  <span style={{ color:P.text }}>{(m.words_formed||[]).join(", ")}</span>
-                  <span style={{ color:P.gold, fontWeight:700, marginLeft:"auto" }}>+{m.score}</span>
-                </>
-              )}
-            </div>
-          );
-        })}
+        {moveList}
       </div>
     </div>
   );
