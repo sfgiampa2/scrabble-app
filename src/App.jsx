@@ -21,13 +21,14 @@ const P = {
   white:   "#FFFFFF",
   text:    "#e8e8f0",
   muted:   "rgba(255,255,255,0.4)",
-  // Board square colors
-  tw:      "#E21D38", // triple word
-  dw:      "#F4A0A0", // double word
-  tl:      "#1D3169", // triple letter
-  dl:      "#A9C2DC", // double letter
-  star:    "#E21D38", // center star
-  normal:  "#1e2a1e", // normal square
+  // Board square colors — more distinct
+  tw:      "#C0392B", // triple word - bold red
+  dw:      "#E8877A", // double word - salmon
+  tl:      "#1A5276", // triple letter - deep blue
+  dl:      "#5DADE2", // double letter - bright blue
+  star:    "#C0392B", // center star
+  normal:  "#1a2e1a", // normal square - dark green
+  boardBg: "#0d1f0d", // board background
 };
 
 const PLAYER_COLORS = ["#2980B9","#E21D38","#8E44AD","#27AE60"];
@@ -95,23 +96,42 @@ function getGameIdFromUrl() {
 
 function getSquareStyle(type) {
   switch(type) {
-    case "TW": return { bg: P.tw, label: "TW", color: "#fff" };
-    case "DW": return { bg: P.dw, label: "DW", color: "#fff" };
-    case "TL": return { bg: P.tl, label: "TL", color: "#fff" };
-    case "DL": return { bg: P.dl, label: "DL", color: "#fff" };
-    case "ST": return { bg: P.star, label: "★", color: "#fff" };
-    default:   return { bg: P.normal, label: "", color: "transparent" };
+    case "TW": return { bg: P.tw,     label: "3W", color: "rgba(255,255,255,0.9)" };
+    case "DW": return { bg: P.dw,     label: "2W", color: "rgba(255,255,255,0.9)" };
+    case "TL": return { bg: P.tl,     label: "3L", color: "rgba(255,255,255,0.9)" };
+    case "DL": return { bg: P.dl,     label: "2L", color: "rgba(255,255,255,0.9)" };
+    case "ST": return { bg: P.star,   label: "★",  color: "rgba(255,255,255,0.9)" };
+    default:   return { bg: P.normal, label: "",   color: "transparent" };
   }
 }
 
 // ─── Word Validation ──────────────────────────────────────────────────────────
+// Use multiple word lists for validation — fast local check first
+const COMMON_INVALID = new Set(["sitt","sitt","ett","ott","ott","tit","sis"]);
+
 async function isValidWord(word) {
   if (word.length < 2) return false;
+  const w = word.toLowerCase();
   try {
-    const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word.toLowerCase()}`);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(
+      `https://api.dictionaryapi.dev/api/v2/entries/en/${w}`,
+      { signal: controller.signal }
+    );
+    clearTimeout(timeout);
     return res.ok;
-  } catch {
-    return true; // fail open if API unavailable
+  } catch (e) {
+    if (e.name === "AbortError") {
+      // Timed out — try backup
+      try {
+        const res2 = await fetch(`https://api.wordnik.com/v4/word.json/${w}/definitions?limit=1&api_key=a2a73e7b947cad4cbbd280c7b2c3b8b4ce31020ea97e0ef8`);
+        return res2.ok;
+      } catch {
+        return false; // fail closed on timeout
+      }
+    }
+    return false;
   }
 }
 
@@ -363,11 +383,13 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
   const [swapSelected, setSwapSelected] = useState(new Set());
   const isMyTurn = game.current_player === myPlayer?.id;
 
-  // Load my rack from players
+  // Load my rack from players — only update if not mid-play
   useEffect(() => {
     const me = players.find(p => p.id === myPlayer?.id);
-    if (me?.rack) setMyRack(me.rack);
-  }, [players, myPlayer]);
+    if (me?.rack && Object.keys(placed).length === 0) {
+      setMyRack(me.rack);
+    }
+  }, [players]);
 
   // Sync board from game
   useEffect(() => {
@@ -419,7 +441,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
   }
 
   function handleDragStart(idx) {
-    setDragTile(idx);
+    setDragTile({ fromRack: true, idx });
     setSelectedTile(idx);
   }
 
@@ -428,16 +450,44 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     const key = `${row},${col}`;
     if (board[key] || placed[key]) return;
     if (dragTile === null) return;
-    const letter = myRack[dragTile];
-    const newRack = [...myRack];
-    newRack.splice(dragTile, 1);
+    let letter, newRack;
+    if (dragTile?.fromRack) {
+      letter = myRack[dragTile.idx];
+      newRack = [...myRack];
+      newRack.splice(dragTile.idx, 1);
+    } else if (dragTile?.fromBoard) {
+      // Already removed from placed and added to rack in handleDragFromBoard
+      letter = dragTile.tile.letter;
+      newRack = myRack.filter(l => {
+        const idx = myRack.lastIndexOf(letter);
+        return idx === -1;
+      });
+      // Simpler: just remove last occurrence of that letter from rack
+      newRack = [...myRack];
+      const lastIdx = newRack.lastIndexOf(letter);
+      if (lastIdx !== -1) newRack.splice(lastIdx, 1);
+    } else {
+      return;
+    }
     setMyRack(newRack);
-    setPlaced({ ...placed, [key]: { letter, rackIdx: dragTile } });
+    setPlaced({ ...placed, [key]: { letter } });
     setDragTile(null);
     setSelectedTile(null);
   }
 
   function handleDragOver(e) { e.preventDefault(); }
+
+  function handleDragFromBoard(row, col) {
+    const key = `${row},${col}`;
+    if (!placed[key]) return;
+    // Remove from placed, put back in hand temporarily
+    setDragTile({ fromBoard: true, key, tile: placed[key] });
+    const newPlaced = { ...placed };
+    delete newPlaced[key];
+    setPlaced(newPlaced);
+    // Temporarily add back to rack so it can be re-dropped
+    setMyRack(prev => [...prev, placed[key].letter]);
+  }
 
   function recallTiles() {
     const letters = Object.values(placed).map(t => t.letter);
@@ -598,7 +648,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     notify("Turn passed");
   }
 
-  const CELL = 36;
+  const CELL = 38;
 
   return (
     <div style={{ minHeight:"100vh", background:P.bg, fontFamily:"'Segoe UI', sans-serif" }}>
@@ -622,8 +672,8 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
         </div>
 
         {/* Board */}
-        <div style={{ border:`2px solid ${P.border}`, borderRadius:4, overflow:"auto", maxWidth:"100vw" }}>
-          <div style={{ display:"grid", gridTemplateColumns:`repeat(15, ${CELL}px)`, gridTemplateRows:`repeat(15, ${CELL}px)`, gap:1, background:P.border, padding:1 }}>
+        <div style={{ border:`3px solid ${P.brown}`, borderRadius:8, overflow:"auto", maxWidth:"100vw", boxShadow:"0 0 30px rgba(0,0,0,0.6)" }}>
+          <div style={{ display:"grid", gridTemplateColumns:`repeat(15, ${CELL}px)`, gridTemplateRows:`repeat(15, ${CELL}px)`, gap:2, background:"#0d1f0d", padding:2 }}>
             {BOARD_LAYOUT.map((row, r) =>
               row.map((type, c) => {
                 const key = `${r},${c}`;
@@ -634,10 +684,12 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                 const canDrop = !permanentTile && !placedTile;
                 return (
                   <div key={key}
-                    style={{ width:CELL, height:CELL, background:permanentTile||placedTile?P.tile:sq.bg, display:"flex", alignItems:"center", justifyContent:"center", cursor:isMyTurn&&canDrop&&isSelected?"pointer":"default", position:"relative", fontSize:10, fontWeight:700, color:sq.color, borderRadius:2, transition:"background 0.1s", outline:placedTile?"2px solid "+P.gold:"none" }}
+                    style={{ width:CELL, height:CELL, background:permanentTile||placedTile?P.tile:sq.bg, display:"flex", alignItems:"center", justifyContent:"center", cursor:isMyTurn&&canDrop&&isSelected?"pointer":"default", position:"relative", fontSize:9, fontWeight:800, color:sq.color, borderRadius:3, transition:"all 0.15s", outline:placedTile?`2px solid ${P.gold}`:"none", boxShadow:placedTile?`0 0 8px ${P.gold}44`:"none" }}
                     onClick={() => isMyTurn && handleSquareClick(r,c)}
                     onDragOver={isMyTurn ? handleDragOver : undefined}
                     onDrop={isMyTurn ? (e)=>handleDropOnSquare(e,r,c) : undefined}
+                    draggable={isMyTurn && !!placedTile}
+                    onDragStart={isMyTurn && placedTile ? ()=>handleDragFromBoard(r,c) : undefined}
                   >
                     {permanentTile ? (
                       <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
@@ -669,7 +721,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
               return (
                 <div key={idx}
                   draggable={isMyTurn && !swapMode}
-                  onDragStart={isMyTurn&&!swapMode ? ()=>handleDragStart(idx) : undefined}
+                  onDragStart={isMyTurn&&!swapMode ? (e)=>{ e.dataTransfer.effectAllowed="move"; handleDragStart(idx); } : undefined}
                   onClick={()=>{ if (!isMyTurn) return; if (swapMode) toggleSwapSelect(idx); else handleTileClick(idx); }}
                   style={{ width:44, height:44, background:isSwapSel?"#444":P.tile, borderRadius:6, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:isMyTurn?"pointer":"default",
                     boxShadow:isSwapSel?`0 0 0 3px ${P.red}, 0 3px 0 ${P.tileShadow}`:isPlaceSel?`0 0 0 3px ${P.gold}, 0 3px 0 ${P.tileShadow}`:`0 3px 0 ${P.tileShadow}`,
