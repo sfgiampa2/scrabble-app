@@ -28,8 +28,9 @@ const P = {
   tl:      "#1A5276", // triple letter - deep blue
   dl:      "#5DADE2", // double letter - bright blue
   star:    "#C0392B", // center star
-  normal:  "#1a2e1a", // normal square - dark green
-  boardBg: "#0d1f0d", // board background
+  normal:  "#2C3E50", // normal square - slate
+  boardBg: "#1a2530", // board background
+  boardBorder: "#34495E",
 };
 
 const PLAYER_COLORS = ["#2980B9","#E21D38","#8E44AD","#27AE60"];
@@ -107,33 +108,26 @@ function getSquareStyle(type) {
 }
 
 // ─── Word Validation ──────────────────────────────────────────────────────────
-// Use multiple word lists for validation — fast local check first
-const COMMON_INVALID = new Set(["sitt","sitt","ett","ott","ott","tit","sis"]);
+// Local Scrabble dictionary — loaded once, cached in memory
+let WORD_SET = null;
+let wordSetLoading = null;
+
+async function getWordSet() {
+  if (WORD_SET) return WORD_SET;
+  if (wordSetLoading) return wordSetLoading;
+  wordSetLoading = fetch("/scrabble_dictionary.txt")
+    .then(r => r.text())
+    .then(text => {
+      WORD_SET = new Set(text.split("\n").map(w => w.trim().toUpperCase()).filter(Boolean));
+      return WORD_SET;
+    });
+  return wordSetLoading;
+}
 
 async function isValidWord(word) {
-  if (word.length < 2) return false;
-  const w = word.toLowerCase();
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
-    const res = await fetch(
-      `https://api.dictionaryapi.dev/api/v2/entries/en/${w}`,
-      { signal: controller.signal }
-    );
-    clearTimeout(timeout);
-    return res.ok;
-  } catch (e) {
-    if (e.name === "AbortError") {
-      // Timed out — try backup
-      try {
-        const res2 = await fetch(`https://api.wordnik.com/v4/word.json/${w}/definitions?limit=1&api_key=a2a73e7b947cad4cbbd280c7b2c3b8b4ce31020ea97e0ef8`);
-        return res2.ok;
-      } catch {
-        return false; // fail closed on timeout
-      }
-    }
-    return false;
-  }
+  if (!word || word.length < 2) return false;
+  const words = await getWordSet();
+  return words.has(word.toUpperCase());
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────
@@ -652,11 +646,10 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
   const CELL = 38;
 
   const [showResign, setShowResign] = useState(false);
-  const [showBag, setShowBag] = useState(false);
 
   // Compute remaining tiles in bag
   const bagCounts = {};
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").forEach(l => { bagCounts[l] = 0; });
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ_".split("").forEach(l => { bagCounts[l] = 0; });
   (game.bag || []).forEach(l => { if (bagCounts[l] !== undefined) bagCounts[l]++; });
 
   async function resign() {
@@ -681,32 +674,11 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
         </div>
       )}
 
-      {/* Bag modal */}
-      {showBag && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.7)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:100 }}>
-          <div style={{ background:P.surface, border:`1px solid ${P.border}`, borderRadius:16, padding:24, maxWidth:360, width:"90%" }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-              <div style={{ fontSize:16, fontWeight:700, color:P.text }}>Tile Bag ({(game.bag||[]).length} remaining)</div>
-              <button style={{ background:"none", border:"none", color:P.muted, cursor:"pointer", fontSize:20 }} onClick={()=>setShowBag(false)}>×</button>
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(6, 1fr)", gap:6 }}>
-              {"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map(l => (
-                <div key={l} style={{ background:bagCounts[l]>0?P.tile:"rgba(255,255,255,0.05)", border:`1px solid ${bagCounts[l]>0?P.tileEdge:P.border}`, borderRadius:6, padding:"6px 4px", textAlign:"center" }}>
-                  <div style={{ fontSize:14, fontWeight:800, color:bagCounts[l]>0?P.brown:P.muted, fontFamily:"'Segoe UI', sans-serif" }}>{l}</div>
-                  <div style={{ fontSize:10, color:bagCounts[l]>0?P.brown:P.muted, fontWeight:700 }}>{bagCounts[l]}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+
 
       {/* Header */}
       <div style={{ background:P.surface, borderBottom:`1px solid ${P.border}`, padding:"10px 16px", display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
         <button style={styles.backBtn} onClick={onBack}>← Leave</button>
-        <button style={{ ...styles.btnSecondary, fontSize:12, padding:"6px 12px" }} onClick={()=>setShowBag(true)}>
-          🎲 Bag ({(game.bag||[]).length})
-        </button>
         <div style={{ flex:1 }} />
         {players.map(p => (
           <div key={p.id} style={{ display:"flex", alignItems:"center", gap:6, padding:"4px 10px", borderRadius:20, background:game.current_player===p.id?`${p.color}22`:"transparent", border:game.current_player===p.id?`1px solid ${p.color}`:"1px solid transparent" }}>
@@ -720,15 +692,32 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
         </button>
       </div>
 
-      <div style={{ display:"flex", flexDirection:"column", alignItems:"center", padding:"16px 8px" }}>
-        {/* Turn indicator */}
-        <div style={{ marginBottom:12, fontSize:14, fontWeight:700, color:isMyTurn?P.gold:P.muted }}>
-          {isMyTurn ? "🎯 Your turn!" : `Waiting for ${players.find(p=>p.id===game.current_player)?.name}…`}
+      <div style={{ display:"flex", gap:12, padding:"12px 8px", justifyContent:"center", alignItems:"flex-start", flexWrap:"wrap" }}>
+        {/* Tile Bag Sidebar */}
+        <div style={{ background:P.surface, border:`1px solid ${P.border}`, borderRadius:12, padding:"12px 10px", minWidth:130, flexShrink:0 }}>
+          <div style={{ fontSize:10, color:P.steel, fontWeight:700, letterSpacing:2, marginBottom:10, textAlign:"center" }}>
+            TILE BAG ({(game.bag||[]).length})
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:4 }}>
+            {"ABCDEFGHIJKLMNOPQRSTUVWXYZ_".split("").map(l => (
+              <div key={l} style={{ background:bagCounts[l]>0?"rgba(255,255,255,0.07)":"rgba(255,255,255,0.02)", border:`1px solid ${bagCounts[l]>0?P.border:"rgba(255,255,255,0.03)"}`, borderRadius:5, padding:"4px 2px", textAlign:"center", opacity:bagCounts[l]>0?1:0.3 }}>
+                <div style={{ fontSize:11, fontWeight:800, color:bagCounts[l]>0?P.text:P.muted, fontFamily:"'Segoe UI', sans-serif" }}>{l}</div>
+                <div style={{ fontSize:10, color:P.gold, fontWeight:700 }}>{bagCounts[l]}</div>
+              </div>
+            ))}
+          </div>
         </div>
 
-        {/* Board */}
-        <div style={{ border:`3px solid ${P.brown}`, borderRadius:8, overflow:"auto", maxWidth:"100vw", boxShadow:"0 0 30px rgba(0,0,0,0.6)" }}>
-          <div style={{ display:"grid", gridTemplateColumns:`repeat(15, ${CELL}px)`, gridTemplateRows:`repeat(15, ${CELL}px)`, gap:2, background:"#0d1f0d", padding:2 }}>
+        {/* Board + Rack column */}
+        <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
+          {/* Turn indicator */}
+          <div style={{ marginBottom:10, fontSize:14, fontWeight:700, color:isMyTurn?P.gold:P.muted }}>
+            {isMyTurn ? "🎯 Your turn!" : `Waiting for ${players.find(p=>p.id===game.current_player)?.name}…`}
+          </div>
+
+          {/* Board */}
+        <div style={{ border:"2px solid #34495E", borderRadius:8, overflow:"auto", maxWidth:"100vw", boxShadow:"0 8px 32px rgba(0,0,0,0.7)", background:"#1a2530" }}>
+          <div style={{ display:"grid", gridTemplateColumns:`repeat(15, ${CELL}px)`, gridTemplateRows:`repeat(15, ${CELL}px)`, gap:1, background:"#1a2530", padding:3 }}>
             {BOARD_LAYOUT.map((row, r) =>
               row.map((type, c) => {
                 const key = `${r},${c}`;
@@ -826,8 +815,23 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
           )}
         </div>
 
-        {/* Move history */}
-        <MoveHistory gameId={gameId} players={players} />
+          {/* Move history */}
+          <MoveHistory gameId={gameId} players={players} />
+        </div>
+        {/* Right sidebar — scores */}
+        <div style={{ background:P.surface, border:`1px solid ${P.border}`, borderRadius:12, padding:"12px 10px", minWidth:130, flexShrink:0 }}>
+          <div style={{ fontSize:10, color:P.steel, fontWeight:700, letterSpacing:2, marginBottom:10, textAlign:"center" }}>SCORES</div>
+          {players.map((p,i) => (
+            <div key={p.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 6px", borderRadius:8, marginBottom:4, background:game.current_player===p.id?`${p.color}22`:"transparent", border:game.current_player===p.id?`1px solid ${p.color}33`:"1px solid transparent" }}>
+              <div style={{ width:10, height:10, borderRadius:"50%", background:p.color, flexShrink:0 }} />
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:12, fontWeight:600, color:P.text }}>{p.name}</div>
+                {game.current_player===p.id && <div style={{ fontSize:9, color:p.color }}>● turn</div>}
+              </div>
+              <div style={{ fontSize:16, fontWeight:800, color:P.gold }}>{scores[p.id]||0}</div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
