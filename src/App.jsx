@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -118,33 +118,61 @@ async function isValidWord(word) {
 // ─── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [view, setView] = useState("home");
+  const viewRef = useRef("home");
   const [gameId, setGameId] = useState(null);
+  const gameIdRef = useRef(null);
   const [game, setGame] = useState(null);
   const [players, setPlayers] = useState([]);
   const [myPlayer, setMyPlayer] = useState(null);
   const [notification, setNotification] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  function setViewBoth(v) { setView(v); viewRef.current = v; }
+
   useEffect(() => {
     const id = getGameIdFromUrl();
-    if (id) { setGameId(id); setView("join"); }
+    if (id) { setGameId(id); gameIdRef.current = id; setViewBoth("join"); }
   }, []);
 
   useEffect(() => {
     if (!gameId) return;
+    gameIdRef.current = gameId;
     loadGame(gameId);
+
+    // Real-time subscriptions
     const ch = supabase.channel(`game:${gameId}`)
       .on("postgres_changes", { event:"*", schema:"public", table:"games", filter:`id=eq.${gameId}` },
-        (p) => { if (p.new) { setGame(p.new); if (p.new.status === "playing" && view === "lobby") setView("game"); }})
+        (p) => {
+          if (p.new) {
+            setGame(p.new);
+            if (p.new.status === "playing" && viewRef.current === "lobby") setViewBoth("game");
+          }
+        })
       .on("postgres_changes", { event:"*", schema:"public", table:"game_players", filter:`game_id=eq.${gameId}` },
         () => loadPlayers(gameId))
       .subscribe();
-    return () => supabase.removeChannel(ch);
+
+    // Polling fallback every 3s for lobby (in case real-time misses)
+    const poll = setInterval(async () => {
+      const currentView = viewRef.current;
+      const currentGameId = gameIdRef.current;
+      if (!currentGameId) return;
+      if (currentView === "lobby" || currentView === "game") {
+        await loadPlayers(currentGameId);
+        const { data } = await supabase.from("games").select("status,current_player,board,bag,turn_number").eq("id",currentGameId).single();
+        if (data) {
+          setGame(prev => ({ ...prev, ...data }));
+          if (data.status === "playing" && currentView === "lobby") setViewBoth("game");
+        }
+      }
+    }, 3000);
+
+    return () => { supabase.removeChannel(ch); clearInterval(poll); };
   }, [gameId]);
 
   async function loadGame(id) {
     const { data } = await supabase.from("games").select("*").eq("id", id).single();
-    if (data) { setGame(data); if (data.status === "playing") setView("game"); }
+    if (data) { setGame(data); if (data.status === "playing") setViewBoth("game"); }
     await loadPlayers(id);
   }
 
@@ -169,7 +197,7 @@ export default function App() {
     await supabase.from("game_players").insert({ id:playerId, game_id:id, name:hostName.trim(), color:PLAYER_COLORS[0], rack:drawn, score:0, position:0 });
     setGameId(id); setMyPlayer({ id:playerId, name:hostName.trim(), color:PLAYER_COLORS[0], rack:drawn, score:0, position:0 });
     window.history.pushState({}, "", `?game=${id}`);
-    setLoading(false); setView("lobby");
+    setLoading(false); setViewBoth("lobby");
   }
 
   async function joinGame(playerName) {
@@ -187,17 +215,17 @@ export default function App() {
     await supabase.from("game_players").insert({ id:playerId, game_id:gameId, name:playerName.trim(), color:PLAYER_COLORS[position], rack:drawn, score:0, position });
     await supabase.from("games").update({ bag: remaining }).eq("id", gameId);
     setMyPlayer({ id:playerId, name:playerName.trim(), color:PLAYER_COLORS[position], rack:drawn, score:0, position });
-    setGame(gd); setLoading(false); setView("lobby");
+    setGame(gd); setLoading(false); setViewBoth("lobby");
   }
 
   async function startGame() {
     if (players.length < 2) return notify("Need at least 2 players","error");
     await supabase.from("games").update({ status:"playing", current_player: players[0]?.id }).eq("id", gameId);
-    setView("game");
+    setViewBoth("game");
   }
 
   function leaveGame() {
-    setView("home"); setGameId(null); setGame(null); setPlayers([]); setMyPlayer(null);
+    setViewBoth("home"); setGameId(null); setGame(null); setPlayers([]); setMyPlayer(null);
     window.history.pushState({}, "", window.location.pathname);
   }
 
