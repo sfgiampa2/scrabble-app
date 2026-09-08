@@ -8,17 +8,19 @@ const supabase = createClient(
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
 const P = {
-  green:   "#2D5016",
-  felt:    "#3B7A2A",
-  lightFelt:"#4A9235",
-  gold:    "#C9A84C",
-  cream:   "#F5EDD6",
-  brown:   "#6B4226",
+  bg:      "#0f0f14",
+  surface: "#1a1a24",
+  border:  "#2a2a3a",
+  navy:    "#1D3169",
+  red:     "#E21D38",
+  gold:    "#FFC300",
+  steel:   "#A9C2DC",
   tile:    "#F2E8C4",
-  tileShadow:"#D4C098",
+  tileShadow:"#C9A84C",
+  brown:   "#6B4226",
   white:   "#FFFFFF",
-  dark:    "#1A1A1A",
-  red:     "#C0392B",
+  text:    "#e8e8f0",
+  muted:   "rgba(255,255,255,0.4)",
 };
 
 const PLAYER_COLORS = ["#2980B9","#C0392B","#8E44AD","#27AE60"];
@@ -154,7 +156,7 @@ export default function App() {
   return (
     <div style={styles.root}>
       {notification && (
-        <div style={{ ...styles.notification, background: notification.type === "error" ? P.red : P.lightFelt }}>
+        <div style={{ ...styles.notification, background: notification.type === "error" ? P.red : "#2D7A1F" }}>
           {notification.msg}
         </div>
       )}
@@ -201,7 +203,7 @@ function HomeView({ onCreate, loading }) {
       </div>
 
       <div style={styles.divider}><span>or join with a link</span></div>
-      <p style={{ textAlign: "center", color: P.cream, opacity: 0.6, fontSize: 14 }}>
+      <p style={{ textAlign: "center", color: P.text, opacity: 0.6, fontSize: 14 }}>
         Ask your host to share the game link with you
       </p>
     </div>
@@ -224,7 +226,7 @@ function JoinView({ gameId, onJoin, loading }) {
       <div style={styles.card}>
         <div style={{ textAlign: "center", marginBottom: 20 }}>
           <div style={{ fontSize: 13, color: P.gold, fontWeight: 700, letterSpacing: 2, marginBottom: 4 }}>JOINING GAME</div>
-          <div style={{ fontSize: 28, fontWeight: 900, color: P.cream, fontFamily: "Georgia, serif", letterSpacing: 3 }}>{gameId}</div>
+          <div style={{ fontSize: 28, fontWeight: 900, color: P.text, fontFamily: "Georgia, serif", letterSpacing: 3 }}>{gameId}</div>
         </div>
         <label style={styles.label}>Your name</label>
         <input
@@ -265,12 +267,12 @@ function LobbyView({ game, players, myPlayer, gameId, onStart, onBack, notify })
 
       <div style={{ textAlign: "center", marginBottom: 32 }}>
         <div style={{ fontSize: 13, color: P.gold, fontWeight: 700, letterSpacing: 3, marginBottom: 8 }}>GAME LOBBY</div>
-        <div style={{ fontSize: 40, fontWeight: 900, color: P.cream, fontFamily: "Georgia, serif", letterSpacing: 6 }}>{gameId}</div>
+        <div style={{ fontSize: 40, fontWeight: 900, color: P.text, fontFamily: "Georgia, serif", letterSpacing: 6 }}>{gameId}</div>
       </div>
 
       {/* Share link */}
       <div style={{ ...styles.card, display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
-        <span style={{ flex: 1, fontSize: 13, color: P.cream, opacity: 0.8 }}>🔗 Share link to invite players</span>
+        <span style={{ flex: 1, fontSize: 13, color: P.text, opacity: 0.8 }}>🔗 Share link to invite players</span>
         <button style={styles.btnSecondary} onClick={copyLink}>
           {copied ? "Copied! ✓" : "Copy Link"}
         </button>
@@ -287,7 +289,7 @@ function LobbyView({ game, players, myPlayer, gameId, onStart, onBack, notify })
               {p.name.charAt(0).toUpperCase()}
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 700, color: P.cream, fontSize: 16 }}>{p.name}</div>
+              <div style={{ fontWeight: 700, color: P.text, fontSize: 16 }}>{p.name}</div>
               <div style={{ fontSize: 12, color: P.gold, opacity: 0.7 }}>{i === 0 ? "Host" : `Player ${i + 1}`}</div>
             </div>
             {p.id === myPlayer?.id && (
@@ -296,9 +298,9 @@ function LobbyView({ game, players, myPlayer, gameId, onStart, onBack, notify })
           </div>
         ))}
         {players.length < 4 && (
-          <div style={{ padding: "10px 0", opacity: 0.3, display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, color: P.cream }}>+</div>
-            <span style={{ color: P.cream, fontSize: 14 }}>Waiting for player…</span>
+          <div style={{ padding: "10px 0", opacity: 0.25, display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, color: P.text }}>+</div>
+            <span style={{ color: P.text, fontSize: 14 }}>Waiting for player…</span>
           </div>
         )}
       </div>
@@ -313,7 +315,7 @@ function LobbyView({ game, players, myPlayer, gameId, onStart, onBack, notify })
         </button>
       )}
       {!isHost && (
-        <div style={{ textAlign: "center", color: P.cream, opacity: 0.5, marginTop: 24, fontSize: 14 }}>
+        <div style={{ textAlign: "center", color: P.text, opacity: 0.5, marginTop: 24, fontSize: 14 }}>
           Waiting for host to start the game…
         </div>
       )}
@@ -328,12 +330,12 @@ function GameBoard({ game, players, myPlayer, gameId, onBack }) {
       <button style={styles.backBtn} onClick={onBack}>← Leave</button>
       <div style={{ textAlign: "center", padding: "60px 0" }}>
         <div style={{ fontSize: 48, marginBottom: 16 }}>🎮</div>
-        <div style={{ fontSize: 24, fontWeight: 700, color: P.cream, marginBottom: 8 }}>Game in progress</div>
-        <div style={{ fontSize: 14, color: P.cream, opacity: 0.6, marginBottom: 32 }}>Board coming in Phase 3!</div>
+        <div style={{ fontSize: 24, fontWeight: 700, color: P.text, marginBottom: 8 }}>Game in progress</div>
+        <div style={{ fontSize: 14, color: P.text, opacity: 0.6, marginBottom: 32 }}>Board coming in Phase 3!</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 300, margin: "0 auto" }}>
           {players.map(p => (
             <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, background: "rgba(255,255,255,0.05)", padding: "12px 16px", borderRadius: 10, borderLeft: `4px solid ${p.color}` }}>
-              <span style={{ flex: 1, color: P.cream, fontWeight: p.id === myPlayer?.id ? 700 : 400 }}>
+              <span style={{ flex: 1, color: P.text, fontWeight: p.id === myPlayer?.id ? 700 : 400 }}>
                 {p.name} {p.id === myPlayer?.id ? "(you)" : ""}
               </span>
               <span style={{ color: P.gold, fontWeight: 700 }}>{p.score}</span>
@@ -349,9 +351,9 @@ function GameBoard({ game, players, myPlayer, gameId, onBack }) {
 const styles = {
   root: {
     minHeight: "100vh",
-    background: `linear-gradient(135deg, ${P.green} 0%, ${P.felt} 50%, ${P.green} 100%)`,
+    background: P.bg,
     fontFamily: "'Segoe UI', system-ui, sans-serif",
-    color: P.cream,
+    color: P.text,
   },
   page: { maxWidth: 480, margin: "0 auto", padding: "24px 20px 60px" },
   notification: {
@@ -365,38 +367,37 @@ const styles = {
     width: 44, height: 44, background: P.tile,
     borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center",
     fontWeight: 900, fontSize: 22, color: P.brown,
-    boxShadow: `0 3px 0 ${P.tileShadow}, 0 4px 8px rgba(0,0,0,0.3)`,
+    boxShadow: `0 3px 0 ${P.tileShadow}, 0 4px 8px rgba(0,0,0,0.5)`,
     fontFamily: "Georgia, serif",
   },
-  heroSub: { color: P.cream, opacity: 0.7, fontSize: 15, margin: 0 },
+  heroSub: { color: P.muted, fontSize: 15, margin: 0 },
   card: {
-    background: "rgba(0,0,0,0.25)",
-    border: "1px solid rgba(255,255,255,0.12)",
+    background: P.surface,
+    border: `1px solid ${P.border}`,
     borderRadius: 16, padding: "20px 18px", marginBottom: 16,
-    backdropFilter: "blur(10px)",
   },
-  label: { fontSize: 12, color: P.gold, fontWeight: 700, letterSpacing: 2, display: "block", marginBottom: 8, textTransform: "uppercase" },
+  label: { fontSize: 11, color: P.steel, fontWeight: 600, letterSpacing: 2, display: "block", marginBottom: 8, textTransform: "uppercase" },
   input: {
-    width: "100%", background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.2)",
-    borderRadius: 8, padding: "12px 14px", color: P.cream, fontSize: 16,
+    width: "100%", background: "rgba(255,255,255,0.05)", border: `1px solid ${P.border}`,
+    borderRadius: 8, padding: "12px 14px", color: P.text, fontSize: 16,
     outline: "none", marginBottom: 14, boxSizing: "border-box", fontFamily: "inherit",
   },
   btnPrimary: {
-    background: P.gold, border: "none", borderRadius: 10, padding: "14px 24px",
-    fontWeight: 800, fontSize: 15, cursor: "pointer", color: P.brown,
-    fontFamily: "inherit", letterSpacing: 0.5,
+    background: P.red, border: "none", borderRadius: 10, padding: "14px 24px",
+    fontWeight: 700, fontSize: 15, cursor: "pointer", color: P.white,
+    fontFamily: "inherit",
   },
   btnSecondary: {
-    background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
+    background: "rgba(255,255,255,0.07)", border: `1px solid ${P.border}`,
     borderRadius: 8, padding: "8px 16px", fontWeight: 600, fontSize: 13,
-    cursor: "pointer", color: P.cream, fontFamily: "inherit",
+    cursor: "pointer", color: P.text, fontFamily: "inherit",
   },
   backBtn: {
-    background: "none", border: "none", color: "rgba(255,255,255,0.5)",
+    background: "none", border: "none", color: P.muted,
     cursor: "pointer", fontSize: 13, padding: "0 0 16px", fontFamily: "inherit",
   },
   divider: {
-    textAlign: "center", position: "relative", margin: "20px 0",
-    color: "rgba(255,255,255,0.3)", fontSize: 13,
+    textAlign: "center", margin: "20px 0",
+    color: P.muted, fontSize: 13,
   },
 };
