@@ -102,7 +102,7 @@ function getSquareStyle(type) {
     case "DW": return { bg: P.dw,     label: "2W", color: "rgba(255,255,255,0.9)" };
     case "TL": return { bg: P.tl,     label: "3L", color: "rgba(255,255,255,0.9)" };
     case "DL": return { bg: P.dl,     label: "2L", color: "rgba(255,255,255,0.9)" };
-    case "ST": return { bg: P.star,   label: "★",  color: "rgba(255,255,255,0.9)" };
+    case "ST": return { bg: P.dw,    label: "★",  color: "rgba(255,255,255,0.9)" };
     default:   return { bg: P.normal, label: "",   color: "transparent" };
   }
 }
@@ -141,8 +141,45 @@ export default function App() {
   const [myPlayer, setMyPlayer] = useState(null);
   const [notification, setNotification] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
   function setViewBoth(v) { setView(v); viewRef.current = v; }
+
+  // Auth state
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      if (session?.user) loadProfile(session.user);
+      setAuthLoading(false);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      if (session?.user) loadProfile(session.user);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  async function loadProfile(u) {
+    const { data } = await supabase.from("profiles").select("*").eq("id", u.id).single();
+    if (data) setProfile(data);
+    else {
+      // Create profile on first login
+      const newProfile = { id: u.id, name: u.user_metadata?.full_name || u.email?.split("@")[0] || "Player", avatar_url: u.user_metadata?.avatar_url || null, color: PLAYER_COLORS[Math.floor(Math.random()*PLAYER_COLORS.length)], games_played:0, games_won:0, total_score:0 };
+      await supabase.from("profiles").insert(newProfile);
+      setProfile(newProfile);
+    }
+  }
+
+  async function signInWithGoogle() {
+    await supabase.auth.signInWithOAuth({ provider:"google", options:{ redirectTo: window.location.origin } });
+  }
+
+  async function signOut() {
+    await supabase.auth.signOut();
+    setUser(null); setProfile(null);
+  }
 
   useEffect(() => {
     const id = getGameIdFromUrl();
@@ -202,7 +239,7 @@ export default function App() {
   }
 
   async function createGame(hostName) {
-    if (!hostName.trim()) return notify("Enter your name","error");
+    const name = hostName?.trim() || profile?.name || "Player";
     setLoading(true);
     const id = generateId();
     const playerId = generateId();
@@ -244,6 +281,14 @@ export default function App() {
     window.history.pushState({}, "", window.location.pathname);
   }
 
+  if (authLoading) return (
+    <div style={{ ...styles.root, display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <div style={{ color:P.muted, fontSize:16 }}>Loading…</div>
+    </div>
+  );
+
+  if (!user) return <AuthView onSignIn={signInWithGoogle} />;
+
   return (
     <div style={styles.root}>
       {notification && (
@@ -251,16 +296,17 @@ export default function App() {
           {notification.msg}
         </div>
       )}
-      {view==="home"  && <HomeView onCreate={createGame} loading={loading} />}
+      {view==="home"  && <HomeView onCreate={createGame} loading={loading} profile={profile} onSignOut={signOut} onProfile={()=>setViewBoth("profile")} />}
       {view==="join"  && <JoinView gameId={gameId} onJoin={joinGame} loading={loading} />}
       {view==="lobby" && game && <LobbyView game={game} players={players} myPlayer={myPlayer} gameId={gameId} onStart={startGame} onBack={leaveGame} notify={notify} />}
+      {view==="profile" && <ProfileView profile={profile} setProfile={setProfile} userId={user?.id} onBack={()=>setViewBoth("home")} />}
       {view==="game"  && game && <GameBoard game={game} players={players} myPlayer={myPlayer} gameId={gameId} notify={notify} onBack={leaveGame} />}
     </div>
   );
 }
 
 // ─── HOME ─────────────────────────────────────────────────────────────────────
-function HomeView({ onCreate, loading }) {
+function HomeView({ onCreate, loading, profile, onSignOut, onProfile }) {
   const [name, setName] = useState("");
   return (
     <div style={styles.page}>
@@ -271,13 +317,20 @@ function HomeView({ onCreate, loading }) {
           ))}
         </div>
         <p style={styles.heroSub}>Up to 4 players · Real-time · Full rules</p>
+        {profile && (
+          <div style={{ display:"flex", alignItems:"center", gap:10, justifyContent:"center", marginTop:12 }}>
+            <div style={{ width:32, height:32, borderRadius:"50%", background:profile.color, display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, color:"#fff", fontSize:14 }}>
+              {profile.name?.charAt(0).toUpperCase()}
+            </div>
+            <span style={{ color:P.text, fontWeight:600 }}>{profile.name}</span>
+            <button style={{ ...styles.btnSecondary, fontSize:12, padding:"4px 10px" }} onClick={onProfile}>Edit Profile</button>
+            <button style={{ ...styles.btnSecondary, fontSize:12, padding:"4px 10px" }} onClick={onSignOut}>Sign Out</button>
+          </div>
+        )}
       </div>
       <div style={styles.card}>
-        <label style={styles.label}>Your name</label>
-        <input style={styles.input} placeholder="Enter your name…" value={name}
-          onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&onCreate(name)} autoFocus />
         <button style={{ ...styles.btnPrimary, width:"100%", opacity:loading?0.6:1 }}
-          onClick={()=>onCreate(name)} disabled={loading}>
+          onClick={()=>onCreate(profile?.name||"Player")} disabled={loading}>
           {loading ? "Creating…" : "Create New Game"}
         </button>
       </div>
@@ -577,7 +630,8 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
           else if (squareType === "DL") wordScore += letterVal * 2;
           else wordScore += letterVal;
           // Collect word multipliers
-          if (squareType === "TW" || squareType === "ST") wordMult *= 3;
+          if (squareType === "TW") wordMult *= 3;
+          else if (squareType === "ST") wordMult *= 2;
           else if (squareType === "DW") wordMult *= 2;
         } else {
           wordScore += letterVal;
@@ -782,12 +836,31 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
 
         {/* Board + Rack column */}
         <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
-          {/* Turn indicator */}
-          <div style={{ marginBottom:10, fontSize:14, fontWeight:700, color:isMyTurn?P.gold:P.muted }}>
-            {isMyTurn ? "🎯 Your turn!" : `Waiting for ${players.find(p=>p.id===game.current_player)?.name}…`}
-          </div>
+          {/* Turn indicator — subtle colored bar only */}
+          <div style={{ marginBottom:8, height:3, width:"100%", borderRadius:2, background:isMyTurn?P.gold:P.border, transition:"background 0.3s", maxWidth:600 }} />
 
           {/* Board */}
+        <div style={{ position:"relative" }}>
+          {/* Floating word validation labels */}
+          {wordValidations.map(({ word, squares, valid, score }, wi) => {
+            if (squares.length === 0) return null;
+            const minR = Math.min(...squares.map(s=>s.r));
+            const minC = Math.min(...squares.map(s=>s.c));
+            const maxC = Math.max(...squares.map(s=>s.c));
+            const CELL = 40;
+            const left = minC * (CELL+1) + 3;
+            const top = minR * (CELL+1) + 3 - 22;
+            const width = (maxC - minC + 1) * (CELL+1) - 1;
+            return (
+              <div key={wi} style={{ position:"absolute", left, top, width, zIndex:20, pointerEvents:"none",
+                background: valid ? "rgba(39,174,96,0.9)" : "rgba(226,29,56,0.9)",
+                borderRadius:4, padding:"2px 6px", display:"flex", justifyContent:"space-between", alignItems:"center", fontSize:11, fontWeight:700, color:"#fff", boxShadow:"0 2px 8px rgba(0,0,0,0.4)" }}>
+                <span>{word}</span>
+                {valid && <span>+{score}</span>}
+                {!valid && <span>✗</span>}
+              </div>
+            );
+          })}
         <div style={{ border:"2px solid #34495E", borderRadius:8, overflow:"auto", maxWidth:"100vw", boxShadow:"0 8px 32px rgba(0,0,0,0.7)", background:"#1a2530" }}>
           <div style={{ display:"grid", gridTemplateColumns:`repeat(15, ${CELL}px)`, gridTemplateRows:`repeat(15, ${CELL}px)`, gap:1, background:"#1a2530", padding:3 }}>
             {BOARD_LAYOUT.map((row, r) =>
@@ -804,11 +877,11 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                       outline: placedTile ? `2px solid ${wordStatus[key]?.valid===true?"#27AE60":wordStatus[key]?.valid===false?"#E21D38":P.gold}` : "none",
                       boxShadow: placedTile && wordStatus[key]?.valid===true ? "0 0 8px rgba(39,174,96,0.4)" : placedTile && wordStatus[key]?.valid===false ? "0 0 8px rgba(226,29,56,0.4)" : placedTile ? `0 0 8px ${P.gold}44` : "none",
                       letterSpacing:-0.5 }}
-                    onClick={() => isMyTurn && handleSquareClick(r,c)}
-                    onDragOver={isMyTurn ? handleDragOver : undefined}
-                    onDrop={isMyTurn ? (e)=>handleDropOnSquare(e,r,c) : undefined}
-                    draggable={isMyTurn && !!placedTile}
-                    onDragStart={isMyTurn && placedTile ? ()=>handleDragFromBoard(r,c) : undefined}
+                    onClick={() => handleSquareClick(r,c)}
+                    onDragOver={handleDragOver}
+                    onDrop={(e)=>handleDropOnSquare(e,r,c)}
+                    draggable={!!placedTile}
+                    onDragStart={placedTile ? ()=>handleDragFromBoard(r,c) : undefined}
                   >
                     {permanentTile ? (
                       <div style={{ width:CELL-4, height:CELL-4, background:P.tile, borderRadius:3, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", border:`1px solid ${P.tileEdge}`, boxShadow:`inset 0 1px 0 rgba(255,255,255,0.5)` }}>
@@ -839,9 +912,9 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
               const isPlaceSel = selectedTile === idx;
               return (
                 <div key={idx}
-                  draggable={isMyTurn && !swapMode}
-                  onDragStart={isMyTurn&&!swapMode ? (e)=>{ e.dataTransfer.effectAllowed="move"; handleDragStart(idx); } : undefined}
-                  onClick={()=>{ if (!isMyTurn) return; if (swapMode) toggleSwapSelect(idx); else handleTileClick(idx); }}
+                  draggable={!swapMode}
+                  onDragStart={!swapMode ? (e)=>{ e.dataTransfer.effectAllowed="move"; handleDragStart(idx); } : undefined}
+                  onClick={()=>{ if (swapMode) toggleSwapSelect(idx); else handleTileClick(idx); }}
                   style={{ width:46, height:46, background:isSwapSel?"#555":P.tile, borderRadius:5, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:isMyTurn?"pointer":"default",
                     border:`1px solid ${isSwapSel?P.red:isPlaceSel?P.gold:P.tileEdge}`,
                     boxShadow:isSwapSel?`inset 0 1px 0 rgba(255,255,255,0.2), 0 0 0 2px ${P.red}, 0 4px 0 #444`:isPlaceSel?`inset 0 1px 0 rgba(255,255,255,0.6), 0 0 0 2px ${P.gold}, 0 4px 0 ${P.tileShadow}`:`inset 0 1px 0 rgba(255,255,255,0.6), inset 0 -2px 0 ${P.tileEdge}, 0 4px 0 ${P.tileShadow}`,
@@ -976,3 +1049,105 @@ const styles = {
   backBtn: { background:"none", border:"none", color:P.muted, cursor:"pointer", fontSize:13, padding:"0 0 16px", fontFamily:"inherit" },
   divider: { textAlign:"center", margin:"20px 0", color:P.muted, fontSize:13 },
 };
+
+// ─── AUTH VIEW ────────────────────────────────────────────────────────────────
+function AuthView({ onSignIn }) {
+  return (
+    <div style={{ ...styles.root, display:"flex", alignItems:"center", justifyContent:"center", minHeight:"100vh" }}>
+      <div style={{ textAlign:"center", maxWidth:400, padding:32 }}>
+        <div style={styles.heroTiles}>
+          {"SCRABBLE".split("").map((l,i) => <div key={i} style={styles.heroTile}>{l}</div>)}
+        </div>
+        <p style={{ color:P.muted, marginBottom:32, fontSize:15 }}>Sign in to play, track your stats and history</p>
+        <button onClick={onSignIn} style={{ display:"flex", alignItems:"center", gap:12, background:P.white, border:"none", borderRadius:10, padding:"14px 24px", fontSize:15, fontWeight:700, color:"#1a1a1a", cursor:"pointer", margin:"0 auto", boxShadow:"0 4px 16px rgba(0,0,0,0.3)" }}>
+          <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34.5 6.5 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.6-.4-3.9z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 15.8 18.9 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34.5 6.5 29.6 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.1l-6.2-5.2C29.3 35.5 26.8 36 24 36c-5.2 0-9.7-3.3-11.3-8l-6.5 5C9.6 39.5 16.3 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.3 4.1-4.2 5.4l6.2 5.2C37 37.6 44 32 44 24c0-1.3-.1-2.6-.4-3.9z"/></svg>
+          Sign in with Google
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── PROFILE VIEW ─────────────────────────────────────────────────────────────
+function ProfileView({ profile, setProfile, userId, onBack }) {
+  const [name, setName] = useState(profile?.name || "");
+  const [color, setColor] = useState(profile?.color || PLAYER_COLORS[0]);
+  const [saving, setSaving] = useState(false);
+  const [games, setGames] = useState([]);
+
+  useEffect(() => {
+    supabase.from("moves").select("game_id, score, words_formed, created_at")
+      .eq("player_id", userId).order("created_at", { ascending:false }).limit(20)
+      .then(({ data }) => { if (data) setGames(data); });
+  }, [userId]);
+
+  async function save() {
+    setSaving(true);
+    const updated = { ...profile, name: name.trim(), color };
+    await supabase.from("profiles").update({ name:name.trim(), color }).eq("id", userId);
+    setProfile(updated);
+    setSaving(false);
+    onBack();
+  }
+
+  return (
+    <div style={styles.page}>
+      <button style={styles.backBtn} onClick={onBack}>← Back</button>
+      <h1 style={{ fontSize:28, fontWeight:900, color:P.text, marginBottom:4 }}>Profile</h1>
+
+      <div style={styles.card}>
+        {/* Avatar */}
+        <div style={{ display:"flex", alignItems:"center", gap:16, marginBottom:20 }}>
+          <div style={{ width:64, height:64, borderRadius:"50%", background:color, display:"flex", alignItems:"center", justifyContent:"center", fontSize:28, fontWeight:900, color:"#fff", boxShadow:`0 4px 16px ${color}66` }}>
+            {(name||"P").charAt(0).toUpperCase()}
+          </div>
+          <div>
+            <div style={{ fontSize:20, fontWeight:700, color:P.text }}>{name || "Player"}</div>
+            <div style={{ fontSize:13, color:P.muted }}>Scrabble Player</div>
+          </div>
+        </div>
+        <label style={styles.label}>Display Name</label>
+        <input style={styles.input} value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" />
+        <label style={styles.label}>Color</label>
+        <div style={{ display:"flex", gap:10, marginBottom:16 }}>
+          {[...PLAYER_COLORS, "#8E44AD","#16A085","#D35400","#7F8C8D"].map(c => (
+            <div key={c} onClick={()=>setColor(c)} style={{ width:32, height:32, borderRadius:"50%", background:c, cursor:"pointer", border:color===c?`3px solid ${P.white}`:"3px solid transparent", boxShadow:color===c?`0 0 0 2px ${c}`:"none", transition:"all 0.15s" }} />
+          ))}
+        </div>
+        <button style={{ ...styles.btnPrimary, width:"100%", opacity:saving?0.6:1 }} onClick={save} disabled={saving}>
+          {saving?"Saving…":"Save Profile"}
+        </button>
+      </div>
+
+      {/* Stats */}
+      <div style={styles.card}>
+        <div style={{ fontSize:11, color:P.steel, fontWeight:700, letterSpacing:2, marginBottom:12 }}>STATS</div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
+          {[
+            { label:"Games", value: profile?.games_played || 0 },
+            { label:"Wins", value: profile?.games_won || 0 },
+            { label:"Avg Score", value: profile?.games_played ? Math.round((profile?.total_score||0)/profile.games_played) : 0 },
+          ].map(s => (
+            <div key={s.label} style={{ textAlign:"center", background:"rgba(255,255,255,0.05)", borderRadius:10, padding:"12px 8px" }}>
+              <div style={{ fontSize:28, fontWeight:900, color:P.gold }}>{s.value}</div>
+              <div style={{ fontSize:11, color:P.muted, marginTop:2 }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Recent moves */}
+      {games.length > 0 && (
+        <div style={styles.card}>
+          <div style={{ fontSize:11, color:P.steel, fontWeight:700, letterSpacing:2, marginBottom:12 }}>RECENT PLAYS</div>
+          {games.slice(0,10).map((m,i) => (
+            <div key={i} style={{ display:"flex", gap:8, padding:"6px 0", borderBottom:"1px solid rgba(255,255,255,0.05)", fontSize:13 }}>
+              <span style={{ color:P.text }}>{(m.words_formed||[]).join(", ") || "—"}</span>
+              <span style={{ color:P.gold, fontWeight:700, marginLeft:"auto" }}>+{m.score}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
