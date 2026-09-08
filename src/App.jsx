@@ -423,7 +423,8 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
   const [myRack, setMyRack] = useState([]);
   const [placed, setPlaced] = useState({});
   const [selectedTile, setSelectedTile] = useState(null);
-  const [wordStatus, setWordStatus] = useState({}); // key -> { valid, score, word }
+  const [wordStatus, setWordStatus] = useState({});
+  const [wordValidations, setWordValidations] = useState([]); // key -> { valid, score, word }
   const [dragTile, setDragTile] = useState(null);
   const [validating, setValidating] = useState(false);
   const [scores, setScores] = useState({});
