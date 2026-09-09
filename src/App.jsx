@@ -272,7 +272,7 @@ export default function App() {
     }
     setLoading(true);
     const { data: gd } = await supabase.from("games").select("*").eq("id", targetGameId).single();
-    if (!gd) { notify("Game not found","error"); setLoading(false); return; }
+    if (!gd) { notify("Game not found — check the code and try again","error"); setLoading(false); return; }
     if (gd.status === "playing") { notify("Game already started","error"); setLoading(false); return; }
     const { data: ep } = await supabase.from("game_players").select("*").eq("game_id", targetGameId);
     if (ep?.length >= 4) { notify("Game is full","error"); setLoading(false); return; }
@@ -284,16 +284,22 @@ export default function App() {
     const newPlayer = { id:playerId, name:playerName.trim(), color:PLAYER_COLORS[position], rack:drawn, score:0, position };
     setMyPlayer(newPlayer);
     sessionStorage.setItem(`myPlayer_${targetGameId}`, JSON.stringify(newPlayer));
+    // Reload players so lobby shows everyone
+    const { data: freshPlayers } = await supabase.from("game_players").select("*").eq("game_id", targetGameId).order("position");
+    if (freshPlayers) setPlayers(freshPlayers);
     setGame(gd); setLoading(false); setViewBoth("lobby");
   }
 
   async function startGame() {
     if (players.length < 2) return notify("Need at least 2 players","error");
     await supabase.from("games").update({ status:"playing", current_player: players[0]?.id }).eq("id", gameId);
-    // Reload fresh game state then navigate
-    const { data } = await supabase.from("games").select("*").eq("id", gameId).single();
-    if (data) setGame(data);
-    setViewBoth("game");
+    // Fetch fresh game and set both before navigating — avoids stale state blank screen
+    const { data: freshGame } = await supabase.from("games").select("*").eq("id", gameId).single();
+    const { data: freshPlayers } = await supabase.from("game_players").select("*").eq("game_id", gameId).order("position");
+    if (freshGame) setGame(freshGame);
+    if (freshPlayers) setPlayers(freshPlayers);
+    // Small delay so React commits the state before rendering GameBoard
+    setTimeout(() => setViewBoth("game"), 100);
   }
 
   function leaveGame() {
@@ -320,7 +326,7 @@ export default function App() {
       {view==="join"  && <JoinView gameId={gameId} onJoin={joinGame} loading={loading} profile={profile} />}
       {view==="lobby" && game && <LobbyView game={game} players={players} myPlayer={myPlayer} gameId={gameId} onStart={startGame} onBack={leaveGame} notify={notify} />}
       {view==="profile" && <ProfileView profile={profile} setProfile={setProfile} userId={user?.id} onBack={()=>setViewBoth("home")} />}
-      {view==="game"  && game && <GameBoard game={game} players={players} myPlayer={myPlayer} gameId={gameId} notify={notify} onBack={leaveGame} />}
+      {view==="game"  && <GameBoard game={game||{board:{},bag:[],status:"playing",turn_number:0}} players={players} myPlayer={myPlayer} gameId={gameId} notify={notify} onBack={leaveGame} />}
     </div>
   );
 }
