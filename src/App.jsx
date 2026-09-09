@@ -265,17 +265,19 @@ export default function App() {
     const targetGameId = (customCode || gameId || "").toUpperCase().trim();
     if (!playerName.trim()) return notify("Enter your name","error");
     if (!targetGameId) return notify("No game found","error");
+    setLoading(true);
+    // Fetch game BEFORE updating gameId state to avoid subscription race
+    const { data: gd } = await supabase.from("games").select("*").eq("id", targetGameId).single();
+    if (!gd) { notify("Game not found — check the code","error"); setLoading(false); return; }
+    if (gd.status === "playing") { notify("Game already started","error"); setLoading(false); return; }
+    const { data: ep } = await supabase.from("game_players").select("*").eq("game_id", targetGameId);
+    if (ep?.length >= 4) { notify("Game is full","error"); setLoading(false); return; }
+    // Now update gameId so subscription fires for the correct game
     if (targetGameId !== gameId) {
       setGameId(targetGameId);
       gameIdRef.current = targetGameId;
       window.history.pushState({}, "", `?game=${targetGameId}`);
     }
-    setLoading(true);
-    const { data: gd } = await supabase.from("games").select("*").eq("id", targetGameId).single();
-    if (!gd) { notify("Game not found — check the code and try again","error"); setLoading(false); return; }
-    if (gd.status === "playing") { notify("Game already started","error"); setLoading(false); return; }
-    const { data: ep } = await supabase.from("game_players").select("*").eq("game_id", targetGameId);
-    if (ep?.length >= 4) { notify("Game is full","error"); setLoading(false); return; }
     const playerId = generateId();
     const position = ep?.length || 0;
     const { drawn, remaining } = drawTiles(gd.bag || [], 7);
@@ -292,14 +294,15 @@ export default function App() {
 
   async function startGame() {
     if (players.length < 2) return notify("Need at least 2 players","error");
+    // Update game status — real-time subscription + polling will detect the
+    // status change and call setViewBoth("game") automatically for everyone
     await supabase.from("games").update({ status:"playing", current_player: players[0]?.id }).eq("id", gameId);
-    // Fetch fresh game and set both before navigating — avoids stale state blank screen
+    // Poll immediately for the host since subscription might have a slight delay
     const { data: freshGame } = await supabase.from("games").select("*").eq("id", gameId).single();
     const { data: freshPlayers } = await supabase.from("game_players").select("*").eq("game_id", gameId).order("position");
     if (freshGame) setGame(freshGame);
     if (freshPlayers) setPlayers(freshPlayers);
-    // Small delay so React commits the state before rendering GameBoard
-    setTimeout(() => setViewBoth("game"), 100);
+    if (freshGame?.status === "playing") setViewBoth("game");
   }
 
   function leaveGame() {
@@ -326,7 +329,12 @@ export default function App() {
       {view==="join"  && <JoinView gameId={gameId} onJoin={joinGame} loading={loading} profile={profile} />}
       {view==="lobby" && game && <LobbyView game={game} players={players} myPlayer={myPlayer} gameId={gameId} onStart={startGame} onBack={leaveGame} notify={notify} />}
       {view==="profile" && <ProfileView profile={profile} setProfile={setProfile} userId={user?.id} onBack={()=>setViewBoth("home")} />}
-      {view==="game"  && <GameBoard game={game||{board:{},bag:[],status:"playing",turn_number:0}} players={players} myPlayer={myPlayer} gameId={gameId} notify={notify} onBack={leaveGame} />}
+      {view==="game"  && !game && (
+        <div style={{ ...styles.root, display:"flex", alignItems:"center", justifyContent:"center", minHeight:"100vh" }}>
+          <div style={{ color:P.muted, fontSize:16 }}>Loading game…</div>
+        </div>
+      )}
+      {view==="game"  && game && <GameBoard game={game} players={players} myPlayer={myPlayer} gameId={gameId} notify={notify} onBack={leaveGame} />}
     </div>
   );
 }
