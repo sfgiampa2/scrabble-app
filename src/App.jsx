@@ -226,6 +226,11 @@ export default function App() {
     const { data } = await supabase.from("games").select("*").eq("id", id).single();
     if (data) { setGame(data); if (data.status === "playing") setViewBoth("game"); }
     await loadPlayers(id);
+    // Restore myPlayer from session if lost (page refresh)
+    if (!myPlayer) {
+      const cached = sessionStorage.getItem(`myPlayer_${id}`);
+      if (cached) { try { setMyPlayer(JSON.parse(cached)); } catch(e) {} }
+    }
   }
 
   async function loadPlayers(id) {
@@ -247,7 +252,9 @@ export default function App() {
     const { drawn, remaining } = drawTiles(bag, 7);
     await supabase.from("games").insert({ id, status:"waiting", board:{}, bag:remaining, current_player:null, turn_number:0 });
     await supabase.from("game_players").insert({ id:playerId, game_id:id, name:hostName.trim(), color:PLAYER_COLORS[0], rack:drawn, score:0, position:0 });
-    setGameId(id); setMyPlayer({ id:playerId, name:hostName.trim(), color:PLAYER_COLORS[0], rack:drawn, score:0, position:0 });
+    const hostPlayer = { id:playerId, name:hostName.trim(), color:PLAYER_COLORS[0], rack:drawn, score:0, position:0 };
+    setGameId(id); setMyPlayer(hostPlayer);
+    sessionStorage.setItem(`myPlayer_${id}`, JSON.stringify(hostPlayer));
     window.history.pushState({}, "", `?game=${id}`);
     setLoading(false); setViewBoth("lobby");
   }
@@ -274,13 +281,18 @@ export default function App() {
     const { drawn, remaining } = drawTiles(gd.bag || [], 7);
     await supabase.from("game_players").insert({ id:playerId, game_id:targetGameId, name:playerName.trim(), color:PLAYER_COLORS[position], rack:drawn, score:0, position });
     await supabase.from("games").update({ bag: remaining }).eq("id", targetGameId);
-    setMyPlayer({ id:playerId, name:playerName.trim(), color:PLAYER_COLORS[position], rack:drawn, score:0, position });
+    const newPlayer = { id:playerId, name:playerName.trim(), color:PLAYER_COLORS[position], rack:drawn, score:0, position };
+    setMyPlayer(newPlayer);
+    sessionStorage.setItem(`myPlayer_${targetGameId}`, JSON.stringify(newPlayer));
     setGame(gd); setLoading(false); setViewBoth("lobby");
   }
 
   async function startGame() {
     if (players.length < 2) return notify("Need at least 2 players","error");
     await supabase.from("games").update({ status:"playing", current_player: players[0]?.id }).eq("id", gameId);
+    // Reload fresh game state then navigate
+    const { data } = await supabase.from("games").select("*").eq("id", gameId).single();
+    if (data) setGame(data);
     setViewBoth("game");
   }
 
@@ -471,10 +483,24 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
   // Load my rack from players — only update if not mid-play
   useEffect(() => {
     const me = players.find(p => p.id === myPlayer?.id);
-    if (me?.rack && Object.keys(placed).length === 0) {
-      setMyRack(me.rack);
+    if (me?.rack) {
+      // Always cache rack to localStorage
+      localStorage.setItem(`rack_${gameId}_${myPlayer?.id}`, JSON.stringify(me.rack));
+      if (Object.keys(placed).length === 0) {
+        setMyRack(me.rack);
+      }
     }
   }, [players]);
+
+  // Restore rack from localStorage if empty on mount (refresh recovery)
+  useEffect(() => {
+    if (myRack.length === 0 && myPlayer?.id && gameId) {
+      const cached = localStorage.getItem(`rack_${gameId}_${myPlayer?.id}`);
+      if (cached) {
+        try { setMyRack(JSON.parse(cached)); } catch(e) {}
+      }
+    }
+  }, [myPlayer?.id, gameId]);
 
   // Validate words as tiles are placed
   useEffect(() => {
@@ -817,15 +843,49 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
   (game.bag || []).forEach(l => { if (bagCounts[l] !== undefined) bagCounts[l]++; });
 
   async function resign() {
-    await supabase.from("games").update({ status:"finished" }).eq("id",gameId);
+    // Winner is the non-resigning player with highest score
+    const winner = players
+      .filter(p => p.id !== myPlayer?.id)
+      .sort((a,b) => (scores[b.id]||0) - (scores[a.id]||0))[0];
+    await supabase.from("games").update({ status:"finished", winner_id: winner?.id }).eq("id",gameId);
     await supabase.from("moves").insert({ id:generateId(), game_id:gameId, player_id:myPlayer?.id, tiles_placed:{}, words_formed:[], score:0, move_type:"resign" });
+    // Update profile stats for resigner (loss) and winner
+    if (myPlayer?.id) {
+      const { data: myProf } = await supabase.from("profiles").select("games_played,total_score").eq("id", myPlayer.id).single();
+      if (myProf) await supabase.from("profiles").update({ games_played: (myProf.games_played||0)+1 }).eq("id", myPlayer.id);
+    }
+    if (winner?.id) {
+      const { data: winProf } = await supabase.from("profiles").select("games_played,games_won,total_score").eq("id", winner.id).single();
+      if (winProf) await supabase.from("profiles").update({
+        games_played: (winProf.games_played||0)+1,
+        games_won: (winProf.games_won||0)+1,
+        total_score: (winProf.total_score||0)+(scores[winner.id]||0)
+      }).eq("id", winner.id);
+    }
   }
 
-  // Watch for game finished
+  // Watch for game finished — update stats and show winner
   useEffect(() => {
     if (game.status === "finished") {
-      notify(`Game over! ${players.sort((a,b)=>(scores[b.id]||0)-(scores[a.id]||0))[0]?.name} wins!`);
-      setTimeout(() => onBack(), 3000);
+      // Find winner — use winner_id if set (resign), otherwise highest score
+      const winnerId = game.winner_id;
+      const winner = winnerId
+        ? players.find(p=>p.id===winnerId)
+        : [...players].sort((a,b)=>(scores[b.id]||0)-(scores[a.id]||0))[0];
+      notify(`Game over! ${winner?.name || "Unknown"} wins!`);
+      // Update stats for all players on normal game end (not resign — handled there)
+      if (!winnerId && myPlayer?.id) {
+        const isWinner = winner?.id === myPlayer.id;
+        supabase.from("profiles").select("games_played,games_won,total_score").eq("id", myPlayer.id).single()
+          .then(({ data: prof }) => {
+            if (prof) supabase.from("profiles").update({
+              games_played: (prof.games_played||0)+1,
+              games_won: isWinner ? (prof.games_won||0)+1 : prof.games_won,
+              total_score: (prof.total_score||0)+(scores[myPlayer.id]||0)
+            }).eq("id", myPlayer.id);
+          });
+      }
+      setTimeout(() => onBack(), 4000);
     }
   }, [game.status]);
 
@@ -1075,7 +1135,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
               <div style={{ width:10, height:10, borderRadius:"50%", background:p.color, flexShrink:0 }} />
               <div style={{ flex:1, minWidth:0 }}>
                 <div style={{ fontSize:12, fontWeight:600, color:P.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p.name}</div>
-                {game.current_player===p.id && <div style={{ fontSize:9, color:p.color }}>● your turn</div>}
+    
               </div>
               <div style={{ fontSize:16, fontWeight:800, color:P.gold }}>{scores[p.id]||0}</div>
             </div>
