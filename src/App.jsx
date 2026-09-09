@@ -252,28 +252,28 @@ export default function App() {
     setLoading(false); setViewBoth("lobby");
   }
 
-  async function joinGame(playerName, customGameId) {
+  async function joinGame(playerName, customCode) {
     const name = profile?.name || playerName?.trim() || "Player";
     playerName = name;
-    const targetGameId = customGameId || gameId;
+    const targetGameId = (customCode || gameId || "").toUpperCase().trim();
     if (!playerName.trim()) return notify("Enter your name","error");
     if (!targetGameId) return notify("No game found","error");
-    if (customGameId && customGameId !== gameId) {
-      setGameId(customGameId);
-      gameIdRef.current = customGameId;
-      window.history.pushState({}, "", `?game=${customGameId}`);
+    if (targetGameId !== gameId) {
+      setGameId(targetGameId);
+      gameIdRef.current = targetGameId;
+      window.history.pushState({}, "", `?game=${targetGameId}`);
     }
     setLoading(true);
-    const { data: gd } = await supabase.from("games").select("*").eq("id", gameId).single();
+    const { data: gd } = await supabase.from("games").select("*").eq("id", targetGameId).single();
     if (!gd) { notify("Game not found","error"); setLoading(false); return; }
     if (gd.status === "playing") { notify("Game already started","error"); setLoading(false); return; }
-    const { data: ep } = await supabase.from("game_players").select("*").eq("game_id", gameId);
+    const { data: ep } = await supabase.from("game_players").select("*").eq("game_id", targetGameId);
     if (ep?.length >= 4) { notify("Game is full","error"); setLoading(false); return; }
     const playerId = generateId();
     const position = ep?.length || 0;
     const { drawn, remaining } = drawTiles(gd.bag || [], 7);
-    await supabase.from("game_players").insert({ id:playerId, game_id:gameId, name:playerName.trim(), color:PLAYER_COLORS[position], rack:drawn, score:0, position });
-    await supabase.from("games").update({ bag: remaining }).eq("id", gameId);
+    await supabase.from("game_players").insert({ id:playerId, game_id:targetGameId, name:playerName.trim(), color:PLAYER_COLORS[position], rack:drawn, score:0, position });
+    await supabase.from("games").update({ bag: remaining }).eq("id", targetGameId);
     setMyPlayer({ id:playerId, name:playerName.trim(), color:PLAYER_COLORS[position], rack:drawn, score:0, position });
     setGame(gd); setLoading(false); setViewBoth("lobby");
   }
@@ -448,6 +448,26 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
   const [blankAssignments, setBlankAssignments] = useState({}); // key -> letter chosen for blank
   const isMyTurn = game.current_player === myPlayer?.id;
 
+  // Shot clock — 5 min per turn, auto-pass when expired
+  const [shotClock, setShotClock] = useState(null);
+  const prevTurnPlayerRef = useRef(null);
+
+  useEffect(() => {
+    if (game.current_player === myPlayer?.id && prevTurnPlayerRef.current !== game.current_player) {
+      playSound("turn");
+      setShotClock(300);
+    }
+    if (game.current_player !== myPlayer?.id) setShotClock(null);
+    prevTurnPlayerRef.current = game.current_player;
+  }, [game.current_player]);
+
+  useEffect(() => {
+    if (shotClock === null) return;
+    if (shotClock <= 0) { passTurn(); setShotClock(null); return; }
+    const t = setTimeout(() => setShotClock(s => s !== null ? s-1 : null), 1000);
+    return () => clearTimeout(t);
+  }, [shotClock]);
+
   // Load my rack from players — only update if not mid-play
   useEffect(() => {
     const me = players.find(p => p.id === myPlayer?.id);
@@ -471,9 +491,18 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     })).then(() => setWordStatus(statusMap));
   }, [placed, blankAssignments]);
 
+  // Track last move for highlighting
+  const [lastMoveSquares, setLastMoveSquares] = useState(new Set());
+
   // Sync board from game
   useEffect(() => {
-    if (game.board) setBoard(game.board);
+    if (game.board) {
+      // Find new squares vs previous board
+      const newSquares = new Set();
+      Object.keys(game.board).forEach(k => { if (!board[k]) newSquares.add(k); });
+      if (newSquares.size > 0) setLastMoveSquares(newSquares);
+      setBoard(game.board);
+    }
     if (game.status === "finished") setGameOver(true);
     // Sync scores
     const s = {};
@@ -492,6 +521,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
 
   function handleSquareClick(row, col) {
     const key = `${row},${col}`;
+    if (Object.keys(placed).length === 0) setLastMoveSquares(new Set()); // clear highlight on first placement
     if (board[key]) return; // already has permanent tile
     if (placed[key]) {
       // Remove tile back to rack
@@ -514,10 +544,11 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
       const newRack = [...myRack];
       newRack.splice(selectedTile, 1);
       setMyRack(newRack);
-      setPlaced({ ...placed, [key]: { letter } });
+      const newPlacedState = { ...placed, [key]: { letter } };
+      setPlaced(newPlacedState);
       setSelectedTile(null);
       playSound("place");
-      if (letter === "_") setBlankPicker({ row, col });
+      if (letter === "_") setTimeout(() => setBlankPicker({ row, col }), 50);
     }
   }
 
@@ -563,7 +594,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     setDragTile(null);
     setSelectedTile(null);
     playSound("place");
-    if (letter === "_") setBlankPicker({ row, col });
+    if (letter === "_") setTimeout(() => setBlankPicker({ row, col }), 50);
   }
 
   function handleDragOver(e) { e.preventDefault(); }
@@ -745,13 +776,27 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     setValidating(false);
     notify(`+${score} points! ${words.map(w=>w.word).join(", ")}`);
     playSound("play");
+    if (newRack.length === 0 && remaining.length === 0) {
+      await supabase.from("games").update({ status:"finished" }).eq("id",gameId);
+    }
   }
 
   async function passTurn() {
+    setShotClock(null);
     const myIdx = players.findIndex(p=>p.id===myPlayer?.id);
     const nextIdx = (myIdx+1)%players.length;
-    await supabase.from("games").update({ current_player:players[nextIdx].id, turn_number:(game.turn_number||0)+1 }).eq("id",gameId);
     await supabase.from("moves").insert({ id:generateId(), game_id:gameId, player_id:myPlayer?.id, tiles_placed:{}, words_formed:[], score:0, move_type:"pass" });
+    // Check consecutive passes — if all players passed twice, end game
+    const { data: recentMoves } = await supabase.from("moves")
+      .select("move_type").eq("game_id",gameId)
+      .order("created_at",{ascending:false}).limit(players.length*2);
+    const allPassed = recentMoves && recentMoves.length >= players.length*2 &&
+      recentMoves.every(m=>m.move_type==="pass");
+    if (allPassed) {
+      await supabase.from("games").update({ status:"finished" }).eq("id",gameId);
+    } else {
+      await supabase.from("games").update({ current_player:players[nextIdx].id, turn_number:(game.turn_number||0)+1 }).eq("id",gameId);
+    }
     notify("Turn passed");
   }
 
@@ -845,6 +890,11 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
             <span style={{ fontSize:13, fontWeight:700, color:P.gold }}>{scores[p.id]||0}</span>
           </div>
         ))}
+        {shotClock !== null && (
+          <div style={{ fontSize:13, fontWeight:700, color:shotClock<=30?P.red:P.gold, minWidth:48, textAlign:"center" }}>
+            ⏱ {Math.floor(shotClock/60)}:{String(shotClock%60).padStart(2,"0")}
+          </div>
+        )}
         <button style={{ ...styles.btnSecondary, fontSize:12, padding:"6px 12px" }} onClick={toggleSound}>
           {soundOn ? "🔊" : "🔇"}
         </button>
@@ -858,6 +908,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
         <div style={{ background:P.surface, border:`1px solid ${P.border}`, borderRadius:12, padding:"12px 10px", minWidth:130, flexShrink:0 }}>
           <div style={{ fontSize:10, color:P.steel, fontWeight:700, letterSpacing:2, marginBottom:10, textAlign:"center" }}>
             TILE BAG ({(game.bag||[]).length})
+            <div style={{ fontSize:9, color:P.muted, fontWeight:400 }}>+ {players.reduce((a,p)=>(p.rack||[]).length+a,0)} in hands</div>
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:4 }}>
             {"ABCDEFGHIJKLMNOPQRSTUVWXYZ_".split("").map(l => (
@@ -919,15 +970,15 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                     onDragStart={placedTile ? ()=>handleDragFromBoard(r,c) : undefined}
                   >
                     {permanentTile ? (
-                      <div style={{ width:CELL-4, height:CELL-4, background:P.tile, borderRadius:3, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", border:`1px solid ${P.tileEdge}`, boxShadow:`inset 0 1px 0 rgba(255,255,255,0.5)` }}>
+                      <div style={{ width:CELL-4, height:CELL-4, background:lastMoveSquares.has(key)?"#E8F5E9":P.tile, borderRadius:3, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", border:`1px solid ${lastMoveSquares.has(key)?"#27AE60":P.tileEdge}`, boxShadow:lastMoveSquares.has(key)?`0 0 6px rgba(39,174,96,0.5), inset 0 1px 0 rgba(255,255,255,0.5)`:`inset 0 1px 0 rgba(255,255,255,0.5)` }}>
                         <span style={{ fontSize:15, fontWeight:800, color:"#888", fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1, fontStyle:permanentTile==="_"?"italic":"normal" }}>
                           {permanentTile==="_" ? (board[key+"_letter"]||"") : permanentTile}
                         </span>
                         <span style={{ fontSize:7, color:P.brown, lineHeight:1, fontWeight:700 }}>{TILE_VALUES[permanentTile]||""}</span>
                       </div>
                     ) : placedTile ? (
-                      <div style={{ width:CELL-4, height:CELL-4, background:"#FFF3CC", borderRadius:3, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:"pointer", border:`1px solid ${P.gold}`, boxShadow:`inset 0 1px 0 rgba(255,255,255,0.7), 0 0 6px ${P.gold}66` }} onClick={()=>isMyTurn&&handleSquareClick(r,c)}>
-                        <span style={{ fontSize:15, fontWeight:800, color:P.brown, fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1 }}>
+                      <div style={{ width:CELL-4, height:CELL-4, background:"#FFF3CC", borderRadius:3, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:"pointer", border:`1px solid ${placedTile.letter==="_"&&!blankAssignments[key]?"#E21D38":P.gold}`, boxShadow:`inset 0 1px 0 rgba(255,255,255,0.7), 0 0 6px ${P.gold}66` }} onClick={()=>{ if(placedTile.letter==="_"&&!blankAssignments[key]){ setBlankPicker({row:r,col:c}); return; } handleSquareClick(r,c); }}>
+                        <span style={{ fontSize:15, fontWeight:800, color:placedTile.letter==="_"&&!blankAssignments[key]?P.red:P.brown, fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1 }}>
                           {placedTile.letter==="_" ? (blankAssignments[key]||"?") : placedTile.letter}
                         </span>
                         <span style={{ fontSize:7, color:P.brown, lineHeight:1, fontWeight:700 }}>{placedTile.letter==="_"?"0":TILE_VALUES[placedTile.letter]||""}</span>
@@ -947,7 +998,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
         <div style={{ marginTop:16, background:P.surface, border:`1px solid ${P.border}`, borderRadius:12, padding:"12px 16px", width:"100%", maxWidth:600 }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
             <div style={{ fontSize:11, color:P.steel, fontWeight:700, letterSpacing:2 }}>YOUR RACK</div>
-            <div style={{ fontSize:10, color:P.muted }}>click tile then click square, or drag</div>
+            <div />
           </div>
           <div style={{ display:"flex", gap:6, justifyContent:"center", flexWrap:"wrap", marginBottom:12 }}>
             {myRack.map((letter, idx) => {
@@ -963,7 +1014,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                     boxShadow:isSwapSel?`inset 0 1px 0 rgba(255,255,255,0.2), 0 0 0 2px ${P.red}, 0 4px 0 #444`:isPlaceSel?`inset 0 1px 0 rgba(255,255,255,0.6), 0 0 0 2px ${P.gold}, 0 4px 0 ${P.tileShadow}`:`inset 0 1px 0 rgba(255,255,255,0.6), inset 0 -2px 0 ${P.tileEdge}, 0 4px 0 ${P.tileShadow}`,
                     transform:isSwapSel||isPlaceSel?"translateY(-5px)":"none", transition:"all 0.1s",
                     opacity:!swapMode&&selectedTile!==null&&!isPlaceSel?0.5:1 }}>
-                  <span style={{ fontSize:20, fontWeight:800, color:isSwapSel?"#aaa":P.brown, fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1 }}>{letter==="_"?"":letter}</span>
+                  <span style={{ fontSize:letter==="_"?16:20, fontWeight:800, color:isSwapSel?"#aaa":P.brown, fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1 }}>{letter==="_"?"★":letter}</span>
                   <span style={{ fontSize:9, color:isSwapSel?"#aaa":P.brown, fontWeight:700 }}>{TILE_VALUES[letter]||""}</span>
                 </div>
               );
@@ -971,40 +1022,48 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
             {myRack.length === 0 && <span style={{ color:P.muted, fontSize:13 }}>No tiles remaining</span>}
           </div>
 
-          {isMyTurn && (
-            <div style={{ display:"flex", gap:8, justifyContent:"center", flexWrap:"wrap" }}>
-              {!swapMode && Object.keys(placed).length > 0 && (
-                <>
-                  <button style={{ ...styles.btnSecondary, fontSize:13 }} onClick={recallTiles}>Recall</button>
-                  <div style={{ fontSize:13, color:P.gold, fontWeight:700, display:"flex", alignItems:"center", gap:4 }}>
-                    +{calculateScore()} pts
-                  </div>
-                  <button style={{ ...styles.btnPrimary, fontSize:13, padding:"8px 20px", opacity:validating?0.6:1 }} onClick={submitPlay} disabled={validating}>
+          <div style={{ display:"flex", gap:8, justifyContent:"center", flexWrap:"wrap" }}>
+            {/* Shuffle — always available */}
+            {!swapMode && Object.keys(placed).length === 0 && (
+              <button style={{ ...styles.btnSecondary, fontSize:13 }} onClick={shuffleRack}>🔀 Shuffle</button>
+            )}
+            {/* When tiles placed — show score preview + recall always, play only on your turn */}
+            {!swapMode && Object.keys(placed).length > 0 && (
+              <>
+                <button style={{ ...styles.btnSecondary, fontSize:13 }} onClick={recallTiles}>Recall</button>
+                <div style={{ fontSize:13, color:wordValidations.length>0&&wordValidations.every(w=>w.valid)?P.gold:P.red, fontWeight:700, display:"flex", alignItems:"center", gap:4 }}>
+                  {wordValidations.length>0&&wordValidations.every(w=>w.valid)?`+${calculateScore()} pts`:"Invalid word"}
+                </div>
+                {isMyTurn && (
+                  <button style={{ ...styles.btnPrimary, fontSize:13, padding:"8px 20px",
+                    opacity:(validating||wordValidations.length===0||wordValidations.some(w=>!w.valid))?0.4:1 }}
+                    onClick={submitPlay}
+                    disabled={validating||wordValidations.length===0||wordValidations.some(w=>!w.valid)}>
                     {validating?"Checking…":"Play Word"}
                   </button>
-                </>
-              )}
-              {!swapMode && Object.keys(placed).length === 0 && (
-                <>
-                  <button style={{ ...styles.btnSecondary, fontSize:13 }} onClick={shuffleRack}>🔀 Shuffle</button>
-                  <button style={{ ...styles.btnSecondary, fontSize:13 }} onClick={()=>setSwapMode(true)}>Swap</button>
-                  <button style={{ ...styles.btnSecondary, fontSize:13 }} onClick={passTurn}>Pass</button>
-                </>
-              )}
-              {swapMode && (
-                <>
-                  <div style={{ width:"100%", textAlign:"center", fontSize:12, color:P.muted, marginBottom:4 }}>
-                    Select tiles to swap ({swapSelected.size} selected)
-                  </div>
-                  <button style={{ ...styles.btnSecondary, fontSize:13 }} onClick={()=>{ setSwapMode(false); setSwapSelected([]); }}>Cancel</button>
-                  <button style={{ ...styles.btnPrimary, fontSize:13, padding:"8px 20px", opacity:swapSelected.length===0?0.4:1 }}
-                    onClick={confirmSwap} disabled={swapSelected.length===0}>
-                    Confirm Swap
-                  </button>
-                </>
-              )}
-            </div>
-          )}
+                )}
+              </>
+            )}
+            {/* Pass/Swap — only on your turn */}
+            {isMyTurn && !swapMode && Object.keys(placed).length === 0 && (
+              <>
+                <button style={{ ...styles.btnSecondary, fontSize:13 }} onClick={()=>setSwapMode(true)}>Swap</button>
+                <button style={{ ...styles.btnSecondary, fontSize:13 }} onClick={()=>setShowPassConfirm(true)}>Pass</button>
+              </>
+            )}
+            {swapMode && (
+              <>
+                <div style={{ width:"100%", textAlign:"center", fontSize:12, color:P.muted, marginBottom:4 }}>
+                  Select tiles to swap ({swapSelected.length} selected)
+                </div>
+                <button style={{ ...styles.btnSecondary, fontSize:13 }} onClick={()=>{ setSwapMode(false); setSwapSelected([]); }}>Cancel</button>
+                <button style={{ ...styles.btnPrimary, fontSize:13, padding:"8px 20px", opacity:swapSelected.length===0?0.4:1 }}
+                  onClick={confirmSwap} disabled={swapSelected.length===0}>
+                  Confirm Swap
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         </div>
