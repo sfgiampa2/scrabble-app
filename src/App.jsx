@@ -110,24 +110,46 @@ function getSquareStyle(type) {
 // ─── Word Validation ──────────────────────────────────────────────────────────
 // Local Scrabble dictionary — loaded once, cached in memory
 let WORD_SET = null;
-let wordSetLoading = null;
+let wordSetPromise = null;
 
 async function getWordSet() {
   if (WORD_SET) return WORD_SET;
-  if (wordSetLoading) return wordSetLoading;
-  wordSetLoading = fetch("/scrabble_dictionary.txt")
-    .then(r => r.text())
-    .then(text => {
-      WORD_SET = new Set(text.split("\n").map(w => w.trim().toUpperCase()).filter(Boolean));
-      return WORD_SET;
-    });
-  return wordSetLoading;
+  if (!wordSetPromise) {
+    wordSetPromise = fetch("/scrabble_dictionary.txt")
+      .then(r => {
+        if (!r.ok) throw new Error("Dictionary fetch failed: " + r.status);
+        return r.text();
+      })
+      .then(text => {
+        WORD_SET = new Set(text.split("\n").map(w => w.trim().toUpperCase()).filter(Boolean));
+        console.log("Dictionary loaded:", WORD_SET.size, "words");
+        return WORD_SET;
+      })
+      .catch(err => {
+        console.error("Dictionary error:", err);
+        wordSetPromise = null; // allow retry
+        return null;
+      });
+  }
+  return wordSetPromise;
 }
 
 async function isValidWord(word) {
   if (!word || word.length < 2) return false;
-  const words = await getWordSet();
-  return words.has(word.toUpperCase());
+  try {
+    const words = await getWordSet();
+    if (!words) {
+      // Dictionary failed to load — fail open so game isn't broken
+      console.warn("Dictionary unavailable, allowing word:", word);
+      return true;
+    }
+    const result = words.has(word.toUpperCase());
+    console.log("Checking:", word.toUpperCase(), "→", result);
+    return result;
+  } catch(e) {
+    console.error("isValidWord error:", e);
+    return true; // fail open
+  }
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────
@@ -197,7 +219,13 @@ export default function App() {
         (p) => {
           if (p.new) {
             setGame(p.new);
-            if (p.new.status === "playing" && viewRef.current === "lobby") setViewBoth("game");
+            // Navigate to game whenever status changes to playing, from any lobby state
+            if (p.new.status === "playing" && (viewRef.current === "lobby" || viewRef.current === "join")) {
+              setViewBoth("game");
+            }
+            if (p.new.status === "finished" && viewRef.current === "game") {
+              // handled inside GameBoard via useEffect
+            }
           }
         })
       .on("postgres_changes", { event:"*", schema:"public", table:"game_players", filter:`game_id=eq.${gameId}` },
@@ -232,6 +260,13 @@ export default function App() {
       if (cached) { try { setMyPlayer(JSON.parse(cached)); } catch(e) {} }
     }
   }
+
+  // Safety net: if we're in game view but game is null, refetch immediately
+  useEffect(() => {
+    if (view === "game" && !game && gameId) {
+      loadGame(gameId);
+    }
+  }, [view, game, gameId]);
 
   async function loadPlayers(id) {
     const { data } = await supabase.from("game_players").select("*").eq("game_id", id).order("position");
@@ -294,15 +329,14 @@ export default function App() {
 
   async function startGame() {
     if (players.length < 2) return notify("Need at least 2 players","error");
-    // Update game status — real-time subscription + polling will detect the
-    // status change and call setViewBoth("game") automatically for everyone
     await supabase.from("games").update({ status:"playing", current_player: players[0]?.id }).eq("id", gameId);
-    // Poll immediately for the host since subscription might have a slight delay
+    // Immediately fetch and set game state for the host, then navigate
     const { data: freshGame } = await supabase.from("games").select("*").eq("id", gameId).single();
     const { data: freshPlayers } = await supabase.from("game_players").select("*").eq("game_id", gameId).order("position");
     if (freshGame) setGame(freshGame);
     if (freshPlayers) setPlayers(freshPlayers);
-    if (freshGame?.status === "playing") setViewBoth("game");
+    // Navigate — game is set so GameBoard will render immediately
+    setViewBoth("game");
   }
 
   function leaveGame() {
@@ -327,7 +361,7 @@ export default function App() {
       )}
       {view==="home"  && <HomeView onCreate={createGame} loading={loading} profile={profile} onSignOut={signOut} onProfile={()=>setViewBoth("profile")} onJoinCode={()=>setViewBoth("join")} />}
       {view==="join"  && <JoinView gameId={gameId} onJoin={joinGame} loading={loading} profile={profile} />}
-      {view==="lobby" && game && <LobbyView game={game} players={players} myPlayer={myPlayer} gameId={gameId} onStart={startGame} onBack={leaveGame} notify={notify} />}
+      {view==="lobby" && <LobbyView game={game||{id:gameId,status:"waiting"}} players={players} myPlayer={myPlayer} gameId={gameId} onStart={startGame} onBack={leaveGame} notify={notify} />}
       {view==="profile" && <ProfileView profile={profile} setProfile={setProfile} userId={user?.id} onBack={()=>setViewBoth("home")} />}
       {view==="game"  && !game && (
         <div style={{ ...styles.root, display:"flex", alignItems:"center", justifyContent:"center", minHeight:"100vh" }}>
