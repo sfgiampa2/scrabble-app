@@ -696,8 +696,8 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
   function getPlacedWords() {
     const allTiles = { ...board };
     Object.entries(placed).forEach(([key, t]) => {
-      // Use assigned letter for blanks
-      allTiles[key] = t.letter === "_" ? (blankAssignments[key] || "A") : t.letter;
+      // Use assignedLetter from tile first, then blankAssignments, then A
+      allTiles[key] = t.letter === "_" ? (t.assignedLetter || blankAssignments[key] || "A") : t.letter;
     });
     const words = [];
     const placedKeys = Object.keys(placed);
@@ -727,8 +727,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
   }
 
   function getTileEffectiveLetter(key) {
-    // For blank tiles, use the assigned letter (but scores 0)
-    if (placed[key]?.letter === "_") return blankAssignments[key] || "A";
+    if (placed[key]?.letter === "_") return placed[key].assignedLetter || blankAssignments[key] || "A";
     if (board[key]) return board[key] === "_" ? "A" : board[key];
     return placed[key]?.letter || "";
   }
@@ -950,8 +949,8 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                 <button key={l} onClick={() => {
                   const key = `${blankPicker.row},${blankPicker.col}`;
                   setBlankAssignments(prev => ({ ...prev, [key]: l }));
+                  setPlaced(prev => ({ ...prev, [key]: { ...prev[key], assignedLetter: l } }));
                   setBlankPicker(null);
-                  setPlaced(prev => ({ ...prev })); // force re-render to show letter
                 }} style={{ width:"100%", aspectRatio:"1", background:P.tile, border:`1px solid ${P.tileEdge}`, borderRadius:6, fontWeight:800, fontSize:16, color:P.brown, cursor:"pointer", fontFamily:"'Segoe UI', sans-serif", boxShadow:`inset 0 1px 0 rgba(255,255,255,0.5), inset 0 -2px 0 ${P.tileEdge}` }}>
                   {l}
                 </button>
@@ -1087,8 +1086,8 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                       </div>
                     ) : placedTile ? (
                       <div style={{ width:CELL-4, height:CELL-4, background:"#FFF3CC", borderRadius:3, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:"pointer", border:`1px solid ${placedTile.letter==="_"&&!blankAssignments[key]?"#E21D38":P.gold}`, boxShadow:`inset 0 1px 0 rgba(255,255,255,0.7), 0 0 6px ${P.gold}66` }} onClick={()=>{ if(placedTile.letter==="_"&&!blankAssignments[key]){ setBlankPicker({row:r,col:c}); return; } handleSquareClick(r,c); }}>
-                        <span style={{ fontSize:15, fontWeight:800, color:placedTile.letter==="_"&&!blankAssignments[key]?P.red:P.brown, fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1 }}>
-                          {placedTile.letter==="_" ? (blankAssignments[key]||"?") : placedTile.letter}
+                        <span style={{ fontSize:15, fontWeight:800, color:placedTile.letter==="_"&&!(placedTile.assignedLetter||blankAssignments[key])?P.red:P.brown, fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1 }}>
+                          {placedTile.letter==="_" ? (placedTile.assignedLetter||blankAssignments[key]||"?") : placedTile.letter}
                         </span>
                         <span style={{ fontSize:7, color:P.brown, lineHeight:1, fontWeight:700 }}>{placedTile.letter==="_"?"0":TILE_VALUES[placedTile.letter]||""}</span>
                       </div>
