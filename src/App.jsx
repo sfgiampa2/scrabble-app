@@ -298,16 +298,13 @@ export default function App() {
     const name = profile?.name || playerName?.trim() || "Player";
     playerName = name;
     const targetGameId = (customCode || gameId || "").toUpperCase().trim();
-    if (!playerName.trim()) return notify("Enter your name","error");
-    if (!targetGameId) return notify("No game found","error");
+    if (!targetGameId) return notify("Enter a game code","error");
     setLoading(true);
-    // Fetch game BEFORE updating gameId state to avoid subscription race
     const { data: gd } = await supabase.from("games").select("*").eq("id", targetGameId).single();
     if (!gd) { notify("Game not found — check the code","error"); setLoading(false); return; }
     if (gd.status === "playing") { notify("Game already started","error"); setLoading(false); return; }
     const { data: ep } = await supabase.from("game_players").select("*").eq("game_id", targetGameId);
     if (ep?.length >= 4) { notify("Game is full","error"); setLoading(false); return; }
-    // Now update gameId so subscription fires for the correct game
     if (targetGameId !== gameId) {
       setGameId(targetGameId);
       gameIdRef.current = targetGameId;
@@ -330,13 +327,18 @@ export default function App() {
   async function startGame() {
     if (players.length < 2) return notify("Need at least 2 players","error");
     await supabase.from("games").update({ status:"playing", current_player: players[0]?.id }).eq("id", gameId);
-    // Immediately fetch and set game state for the host, then navigate
-    const { data: freshGame } = await supabase.from("games").select("*").eq("id", gameId).single();
-    const { data: freshPlayers } = await supabase.from("game_players").select("*").eq("game_id", gameId).order("position");
-    if (freshGame) setGame(freshGame);
-    if (freshPlayers) setPlayers(freshPlayers);
-    // Navigate — game is set so GameBoard will render immediately
-    setViewBoth("game");
+    for (let i = 0; i < 10; i++) {
+      await new Promise(r => setTimeout(r, 400));
+      const { data: g } = await supabase.from("games").select("*").eq("id", gameId).single();
+      const { data: ps } = await supabase.from("game_players").select("*").eq("game_id", gameId).order("position");
+      if (g?.status === "playing") {
+        setGame(g);
+        if (ps) setPlayers(ps);
+        setViewBoth("game");
+        return;
+      }
+    }
+    notify("Please refresh to start","error");
   }
 
   function leaveGame() {
@@ -413,8 +415,14 @@ function HomeView({ onCreate, loading, profile, onSignOut, onProfile, onJoinCode
 }
 
 // ─── JOIN ─────────────────────────────────────────────────────────────────────
-function JoinView({ gameId, onJoin, loading }) {
+function JoinView({ gameId: initialGameId, onJoin, loading }) {
   const [name, setName] = useState("");
+  const [code, setCode] = useState(initialGameId || "");
+  function doJoin() {
+    const finalCode = (code || initialGameId || "").trim().toUpperCase();
+    if (!finalCode) return;
+    onJoin(name.trim() || "Player", finalCode);
+  }
   return (
     <div style={styles.page}>
       <div style={styles.hero}>
@@ -423,15 +431,25 @@ function JoinView({ gameId, onJoin, loading }) {
         </div>
       </div>
       <div style={styles.card}>
-        <div style={{ textAlign:"center", marginBottom:20 }}>
-          <div style={{ fontSize:12, color:P.steel, fontWeight:700, letterSpacing:2, marginBottom:6 }}>JOINING GAME</div>
-          <div style={{ fontSize:32, fontWeight:900, color:P.gold, fontFamily:"Georgia, serif", letterSpacing:4 }}>{gameId}</div>
-        </div>
+        <div style={{ fontSize:12, color:P.steel, fontWeight:700, letterSpacing:2, marginBottom:16, textAlign:"center" }}>JOIN A GAME</div>
+        {!initialGameId && (<>
+          <label style={styles.label}>Game Code</label>
+          <input
+            style={{ ...styles.input, fontSize:22, fontWeight:800, letterSpacing:8, textAlign:"center", textTransform:"uppercase" }}
+            placeholder="ABC123" maxLength={6} value={code}
+            onChange={e=>setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,""))}
+            onKeyDown={e=>e.key==="Enter"&&doJoin()} autoFocus />
+        </>)}
+        {initialGameId && (
+          <div style={{ fontSize:32, fontWeight:900, color:P.gold, textAlign:"center", letterSpacing:6, marginBottom:16 }}>{initialGameId}</div>
+        )}
         <label style={styles.label}>Your name</label>
         <input style={styles.input} placeholder="Enter your name…" value={name}
-          onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&onJoin(name)} autoFocus />
-        <button style={{ ...styles.btnPrimary, width:"100%", opacity:loading?0.6:1 }}
-          onClick={()=>onJoin(name)} disabled={loading}>
+          onChange={e=>setName(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&doJoin()}
+          autoFocus={!!initialGameId} />
+        <button style={{ ...styles.btnPrimary, width:"100%", opacity:(loading||(!code&&!initialGameId))?0.5:1 }}
+          onClick={doJoin} disabled={loading||(!code&&!initialGameId)}>
           {loading ? "Joining…" : "Join Game"}
         </button>
       </div>
