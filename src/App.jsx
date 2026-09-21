@@ -279,7 +279,7 @@ export default function App() {
   }
 
   async function createGame(hostName) {
-    const name = profile?.name || hostName?.trim() || "Player";
+    const name = hostName?.trim() || "Player";
     setLoading(true);
     const id = generateId();
     const playerId = generateId();
@@ -295,7 +295,7 @@ export default function App() {
   }
 
   async function joinGame(playerName, customCode) {
-    const name = profile?.name || playerName?.trim() || "Player";
+    const name = playerName?.trim() || "Player";
     playerName = name;
     const targetGameId = (customCode || gameId || "").toUpperCase().trim();
     if (!targetGameId) return notify("Enter a game code","error");
@@ -399,8 +399,11 @@ function HomeView({ onCreate, loading, profile, onSignOut, onProfile, onJoinCode
         )}
       </div>
       <div style={styles.card}>
+        <label style={styles.label}>Your name</label>
+        <input style={styles.input} placeholder="Enter your name…" value={name}
+          onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&onCreate(name)} />
         <button style={{ ...styles.btnPrimary, width:"100%", opacity:loading?0.6:1 }}
-          onClick={()=>onCreate(profile?.name||"Player")} disabled={loading}>
+          onClick={()=>onCreate(name)} disabled={loading}>
           {loading ? "Creating…" : "Create New Game"}
         </button>
       </div>
