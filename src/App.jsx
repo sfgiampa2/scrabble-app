@@ -609,7 +609,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
   useEffect(() => {
     const ch = supabase.channel(`board:${gameId}`)
       .on("postgres_changes", { event:"UPDATE", schema:"public", table:"games", filter:`id=eq.${gameId}` },
-        (p) => { if (p.new?.board) setBoard(p.new.board); if (p.new) setGame && null; })
+        (p) => { if (p.new?.board) setBoard(p.new.board); })
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, [gameId]);
@@ -918,18 +918,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     await supabase.from("games").update({ status:"finished", winner_id: winner?.id }).eq("id",gameId);
     await supabase.from("moves").insert({ id:generateId(), game_id:gameId, player_id:myPlayer?.id, tiles_placed:{}, words_formed:[], score:0, move_type:"resign" });
     // Update profile stats for resigner (loss) and winner
-    if (myPlayer?.id) {
-      const { data: myProf } = await supabase.from("profiles").select("games_played,total_score").eq("id", myPlayer.id).single();
-      if (myProf) await supabase.from("profiles").update({ games_played: (myProf.games_played||0)+1 }).eq("id", myPlayer.id);
-    }
-    if (winner?.id) {
-      const { data: winProf } = await supabase.from("profiles").select("games_played,games_won,total_score").eq("id", winner.id).single();
-      if (winProf) await supabase.from("profiles").update({
-        games_played: (winProf.games_played||0)+1,
-        games_won: (winProf.games_won||0)+1,
-        total_score: (winProf.total_score||0)+(scores[winner.id]||0)
-      }).eq("id", winner.id);
-    }
+
   }
 
   // Watch for game finished — update stats and show winner
@@ -941,18 +930,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
         ? players.find(p=>p.id===winnerId)
         : [...players].sort((a,b)=>(scores[b.id]||0)-(scores[a.id]||0))[0];
       notify(`Game over! ${winner?.name || "Unknown"} wins!`);
-      // Update stats for all players on normal game end (not resign — handled there)
-      if (!winnerId && myPlayer?.id) {
-        const isWinner = winner?.id === myPlayer.id;
-        supabase.from("profiles").select("games_played,games_won,total_score").eq("id", myPlayer.id).single()
-          .then(({ data: prof }) => {
-            if (prof) supabase.from("profiles").update({
-              games_played: (prof.games_played||0)+1,
-              games_won: isWinner ? (prof.games_won||0)+1 : prof.games_won,
-              total_score: (prof.total_score||0)+(scores[myPlayer.id]||0)
-            }).eq("id", myPlayer.id);
-          });
-      }
+
       setTimeout(() => onBack(), 4000);
     }
   }, [game.status]);
@@ -1138,13 +1116,12 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                   draggable={!swapMode}
                   onDragStart={!swapMode ? (e)=>{ e.dataTransfer.effectAllowed="move"; handleDragStart(idx); } : undefined}
                   onClick={()=>{ if (swapMode) toggleSwapSelect(idx); else handleTileClick(idx); }}
-                  style={{ width:48, height:48, background:isSwapSel?"#555":P.tile, borderRadius:5, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:"grab",
-                    border:`1px solid ${isSwapSel?P.red:isPlaceSel?P.gold:P.tileEdge}`,
-                    boxShadow:isSwapSel?`inset 0 1px 0 rgba(255,255,255,0.2), 0 0 0 2px ${P.red}, 0 4px 0 #444`:isPlaceSel?`inset 0 1px 0 rgba(255,255,255,0.6), 0 0 0 2px ${P.gold}, 0 4px 0 ${P.tileShadow}`:`inset 0 1px 0 rgba(255,255,255,0.6), inset 0 -2px 0 ${P.tileEdge}, 0 4px 0 ${P.tileShadow}`,
-                    transform:isSwapSel||isPlaceSel?"translateY(-5px)":"none", transition:"all 0.1s",
-                    opacity:!swapMode&&selectedTile!==null&&!isPlaceSel?0.5:1 }}>
-                  <span style={{ fontSize:letter==="_"?16:20, fontWeight:800, color:isSwapSel?"#aaa":P.brown, fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1 }}>{letter==="_"?"★":letter}</span>
-                  <span style={{ fontSize:9, color:isSwapSel?"#aaa":P.brown, fontWeight:700 }}>{TILE_VALUES[letter]||""}</span>
+                  style={{ width:48, height:48, background:isSwapSel?"#999":"#F5E6B8", borderRadius:6, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:"grab", position:"relative",
+                    boxShadow:isSwapSel?`0 0 0 2px ${P.red}, inset 0 -3px 0 rgba(0,0,0,0.2)`:isPlaceSel?`0 0 0 2px ${P.gold}, inset 0 -3px 0 rgba(0,0,0,0.2)`:`inset 0 -3px 0 rgba(0,0,0,0.2), 0 2px 4px rgba(0,0,0,0.2)`,
+                    transform:isSwapSel||isPlaceSel?"translateY(-4px)":"none", transition:"all 0.1s",
+                    opacity:!swapMode&&selectedTile!==null&&!isPlaceSel?0.4:1 }}>
+                  <span style={{ fontSize:22, fontWeight:900, color:"#2C1810", fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1, marginTop:2 }}>{letter==="_"?"★":letter}</span>
+                  <span style={{ fontSize:9, color:"#5D3A1A", fontWeight:700, position:"absolute", bottom:3, right:4 }}>{TILE_VALUES[letter]||""}</span>
                 </div>
               );
             })}
@@ -1165,10 +1142,10 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                 </div>
                 {isMyTurn && (
                   <button style={{ ...styles.btnPrimary, fontSize:13, padding:"8px 20px",
-                    opacity:(validating||wordValidations.length===0||wordValidations.some(w=>!w.valid))?0.4:1 }}
+                    opacity:(validating||wordValidations.some(w=>!w.valid))?0.4:1 }}
                     onClick={submitPlay}
-                    disabled={validating||wordValidations.length===0||wordValidations.some(w=>!w.valid)}>
-                    {validating?"Checking…":"Play Word"}
+                    disabled={validating||wordValidations.some(w=>!w.valid)}>
+                    {validating?"Checking…":wordValidations.length===0?"Validating…":"Play Word"}
                   </button>
                 )}
               </>
