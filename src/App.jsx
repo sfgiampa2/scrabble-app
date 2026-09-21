@@ -163,45 +163,7 @@ export default function App() {
   const [myPlayer, setMyPlayer] = useState(null);
   const [notification, setNotification] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [user, setUser] = useState(null);
-  const [profile, setProfile] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
-
   function setViewBoth(v) { setView(v); viewRef.current = v; }
-
-  // Auth state
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (session?.user) loadProfile(session.user);
-      setAuthLoading(false);
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) loadProfile(session.user);
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-
-  async function loadProfile(u) {
-    const { data } = await supabase.from("profiles").select("*").eq("id", u.id).single();
-    if (data) setProfile(data);
-    else {
-      // Create profile on first login
-      const newProfile = { id: u.id, name: u.user_metadata?.full_name || u.email?.split("@")[0] || "Player", avatar_url: u.user_metadata?.avatar_url || null, color: PLAYER_COLORS[Math.floor(Math.random()*PLAYER_COLORS.length)], games_played:0, games_won:0, total_score:0 };
-      await supabase.from("profiles").insert(newProfile);
-      setProfile(newProfile);
-    }
-  }
-
-  async function signInWithGoogle() {
-    await supabase.auth.signInWithOAuth({ provider:"google", options:{ redirectTo: window.location.origin } });
-  }
-
-  async function signOut() {
-    await supabase.auth.signOut();
-    setUser(null); setProfile(null);
-  }
 
   useEffect(() => {
     const id = getGameIdFromUrl();
@@ -346,14 +308,6 @@ export default function App() {
     window.history.pushState({}, "", window.location.pathname);
   }
 
-  if (authLoading) return (
-    <div style={{ ...styles.root, display:"flex", alignItems:"center", justifyContent:"center" }}>
-      <div style={{ color:P.muted, fontSize:16 }}>Loading…</div>
-    </div>
-  );
-
-  if (!user) return <AuthView onSignIn={signInWithGoogle} />;
-
   return (
     <div style={styles.root}>
       {notification && (
@@ -361,10 +315,9 @@ export default function App() {
           {notification.msg}
         </div>
       )}
-      {view==="home"  && <HomeView onCreate={createGame} loading={loading} profile={profile} onSignOut={signOut} onProfile={()=>setViewBoth("profile")} onJoinCode={()=>setViewBoth("join")} />}
-      {view==="join"  && <JoinView gameId={gameId} onJoin={joinGame} loading={loading} profile={profile} />}
+      {view==="home"  && <HomeView onCreate={createGame} loading={loading} onJoinCode={()=>setViewBoth("join")} />}
+      {view==="join"  && <JoinView gameId={gameId} onJoin={joinGame} loading={loading} />}
       {view==="lobby" && <LobbyView game={game||{id:gameId,status:"waiting"}} players={players} myPlayer={myPlayer} gameId={gameId} onStart={startGame} onBack={leaveGame} notify={notify} />}
-      {view==="profile" && <ProfileView profile={profile} setProfile={setProfile} userId={user?.id} onBack={()=>setViewBoth("home")} />}
       {view==="game"  && !game && (
         <div style={{ ...styles.root, display:"flex", alignItems:"center", justifyContent:"center", minHeight:"100vh" }}>
           <div style={{ color:P.muted, fontSize:16 }}>Loading game…</div>
@@ -376,7 +329,7 @@ export default function App() {
 }
 
 // ─── HOME ─────────────────────────────────────────────────────────────────────
-function HomeView({ onCreate, loading, profile, onSignOut, onProfile, onJoinCode }) {
+function HomeView({ onCreate, loading, onJoinCode }) {
   const [name, setName] = useState("");
   return (
     <div style={styles.page}>
@@ -387,16 +340,7 @@ function HomeView({ onCreate, loading, profile, onSignOut, onProfile, onJoinCode
           ))}
         </div>
         <p style={styles.heroSub}>Up to 4 players · Real-time · Full rules</p>
-        {profile && (
-          <div style={{ display:"flex", alignItems:"center", gap:10, justifyContent:"center", marginTop:12 }}>
-            <div style={{ width:32, height:32, borderRadius:"50%", background:profile.color, display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, color:"#fff", fontSize:14 }}>
-              {profile.name?.charAt(0).toUpperCase()}
-            </div>
-            <span style={{ color:P.text, fontWeight:600 }}>{profile.name}</span>
-            <button style={{ ...styles.btnSecondary, fontSize:12, padding:"4px 10px" }} onClick={onProfile}>Edit Profile</button>
-            <button style={{ ...styles.btnSecondary, fontSize:12, padding:"4px 10px" }} onClick={onSignOut}>Sign Out</button>
-          </div>
-        )}
+
       </div>
       <div style={styles.card}>
         <label style={styles.label}>Your name</label>
