@@ -152,6 +152,62 @@ async function isValidWord(word) {
   }
 }
 
+// ─── Sound System ─────────────────────────────────────────────────────────────
+let _audioCtx = null;
+function getAudioCtx() {
+  if (!_audioCtx) {
+    const C = window.AudioContext || window.webkitAudioContext;
+    if (C) _audioCtx = new C();
+  }
+  if (_audioCtx?.state === "suspended") _audioCtx.resume();
+  return _audioCtx;
+}
+function playSound(type) {
+  if (localStorage.getItem("scrabbleSoundOff") === "true") return;
+  try {
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    if (type === "place") {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.frequency.setValueAtTime(440, now);
+      o.frequency.exponentialRampToValueAtTime(880, now + 0.06);
+      g.gain.setValueAtTime(0.15, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+      o.start(now); o.stop(now + 0.1);
+    } else if (type === "play") {
+      [523, 659, 784].forEach((freq, i) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.connect(g); g.connect(ctx.destination);
+        o.frequency.value = freq;
+        g.gain.setValueAtTime(0, now + i * 0.08);
+        g.gain.linearRampToValueAtTime(0.2, now + i * 0.08 + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.08 + 0.15);
+        o.start(now + i * 0.08); o.stop(now + i * 0.08 + 0.15);
+      });
+    } else if (type === "recall") {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.frequency.setValueAtTime(880, now);
+      o.frequency.exponentialRampToValueAtTime(220, now + 0.12);
+      g.gain.setValueAtTime(0.1, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      o.start(now); o.stop(now + 0.15);
+    } else if (type === "turn") {
+      [523, 659].forEach((freq, i) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = "sine"; o.connect(g); g.connect(ctx.destination);
+        o.frequency.value = freq;
+        g.gain.setValueAtTime(0, now + i * 0.15);
+        g.gain.linearRampToValueAtTime(0.25, now + i * 0.15 + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.15 + 0.4);
+        o.start(now + i * 0.15); o.stop(now + i * 0.15 + 0.4);
+      });
+    }
+  } catch(e) {}
+}
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [view, setView] = useState("home");
