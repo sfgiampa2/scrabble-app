@@ -951,6 +951,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                   const key = `${blankPicker.row},${blankPicker.col}`;
                   setBlankAssignments(prev => ({ ...prev, [key]: l }));
                   setBlankPicker(null);
+                  setPlaced(prev => ({ ...prev })); // force re-render to show letter
                 }} style={{ width:"100%", aspectRatio:"1", background:P.tile, border:`1px solid ${P.tileEdge}`, borderRadius:6, fontWeight:800, fontSize:16, color:P.brown, cursor:"pointer", fontFamily:"'Segoe UI', sans-serif", boxShadow:`inset 0 1px 0 rgba(255,255,255,0.5), inset 0 -2px 0 ${P.tileEdge}` }}>
                   {l}
                 </button>
