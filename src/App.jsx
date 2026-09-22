@@ -925,7 +925,12 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
       return type && type !== "" ? type : null;
     }).filter(Boolean);
     const uniqueSpecials = [...new Set(specialSquares)];
-    await supabase.from("moves").insert({ id:generateId(), game_id:gameId, player_id:myPlayer?.id, tiles_placed:placed, words_formed:words.map(w=>w.word), score, move_type:"play", special_squares:uniqueSpecials });
+    // Store square positions for each word so history can color tiles
+    const wordSquares = words.map(w => w.squares.map(({r,c}) => {
+      const type = BOARD_LAYOUT[r]?.[c] || "";
+      return { r, c, type };
+    }));
+    await supabase.from("moves").insert({ id:generateId(), game_id:gameId, player_id:myPlayer?.id, tiles_placed:placed, words_formed:words.map(w=>w.word), word_squares:wordSquares, score, move_type:"play", special_squares:uniqueSpecials });
     const lastMoveWords = words.map(w => ({ word:w.word, squares:w.squares.map(({r,c})=>({r,c})) }));
     await supabase.from("games").update({ board:newBoard, bag:remaining, current_player:nextPlayer.id, turn_number:(game.turn_number||0)+1, last_move:{ words:lastMoveWords, score, player:myPlayer?.name } }).eq("id",gameId);
     await supabase.from("game_players").update({ rack:newRack, score:(scores[myPlayer?.id]||0)+score }).eq("id",myPlayer?.id);
@@ -1338,27 +1343,29 @@ function MoveHistory({ gameId, players, compact }) {
           {m.move_type==="pass" && <span style={{ color:P.muted, fontSize:10 }}>passed</span>}
           {m.move_type==="swap" && <span style={{ color:P.muted, fontSize:10 }}>swapped</span>}
           {m.move_type==="resign" && <span style={{ color:P.red, fontSize:10, fontWeight:700 }}>resigned</span>}
-          {m.move_type==="play" && (
-            <div style={{ display:"flex", alignItems:"center", gap:4, marginLeft:"auto" }}>
-              {(m.special_squares||[]).map((sq,i) => {
-                const colors = { TW:"#C1544A", DW:"#E8A598", TL:"#3B8EA5", DL:"#A8CFDD", ST:"#C1544A" };
-                return <span key={i} style={{ background:colors[sq]||"#999", color:"#fff", fontSize:9, fontWeight:800, borderRadius:4, padding:"1px 4px" }}>{sq}</span>;
-              })}
-              <span style={{ color:"#27AE60", fontWeight:800, fontSize:12 }}>+{m.score}</span>
-            </div>
-          )}
+          {m.move_type==="play" && <span style={{ color:"#27AE60", fontWeight:800, fontSize:12, marginLeft:"auto" }}>+{m.score}</span>}
         </div>
         {m.move_type==="play" && (
           <div style={{ display:"flex", flexDirection:"column", gap:3, paddingLeft:14 }}>
-            {(m.words_formed||[]).map((word,wi) => (
-              <div key={wi} style={{ display:"flex", gap:1 }}>
-                {word.split("").map((letter,li) => (
-                  <div key={li} style={{ width:18, height:20, background:"#F5E6B8", borderRadius:3, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:900, color:"#2C1810", boxShadow:"inset 0 -1px 0 rgba(0,0,0,0.2)" }}>
-                    {letter}
-                  </div>
-                ))}
-              </div>
-            ))}
+            {(m.words_formed||[]).map((word,wi) => {
+              const squares = m.word_squares?.[wi] || [];
+              const sqColors = { TW:"#C1544A", DW:"#E8A598", TL:"#3B8EA5", DL:"#A8CFDD", ST:"#C1544A" };
+              const sqText  = { TW:"#fff", DW:"#fff", TL:"#fff", DL:"#2C1810", ST:"#fff" };
+              return (
+                <div key={wi} style={{ display:"flex", gap:1 }}>
+                  {word.split("").map((letter,li) => {
+                    const sqType = squares[li]?.type || "";
+                    const bg = sqColors[sqType] || "#F5E6B8";
+                    const fg = sqType ? sqText[sqType] : "#2C1810";
+                    return (
+                      <div key={li} style={{ width:18, height:20, background:bg, borderRadius:3, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:900, color:fg, boxShadow:"inset 0 -1px 0 rgba(0,0,0,0.2)" }}>
+                        {letter}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
