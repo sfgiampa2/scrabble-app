@@ -837,16 +837,16 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     // Check center square on first move
     const isFirstMove = Object.keys(board).length === 0;
     if (isFirstMove && !placed["7,7"]) return notify("First word must cover the center star","error");
-    // Check connectivity
+    // Check connectivity — fetch fresh board from DB to avoid stale state
     if (!isFirstMove) {
-      const allTiles = { ...board };
-      Object.entries(placed).forEach(([k,t]) => { allTiles[k] = t.letter; });
+      const { data: freshBoardData } = await supabase.from("games").select("board").eq("id",gameId).single();
+      const freshBoard = freshBoardData?.board || board;
       let connected = false;
       Object.keys(placed).forEach(key => {
         const [r,c] = key.split(",").map(Number);
-        if (board[`${r-1},${c}`]||board[`${r+1},${c}`]||board[`${r},${c-1}`]||board[`${r},${c+1}`]) connected = true;
+        if (freshBoard[`${r-1},${c}`]||freshBoard[`${r+1},${c}`]||freshBoard[`${r},${c-1}`]||freshBoard[`${r},${c+1}`]) connected = true;
       });
-      if (!connected) return notify("Tiles must connect to existing words","error");
+      if (!connected) { notify("Tiles must connect to existing words","error"); return; }
     }
     setValidating(true);
     const words = getPlacedWords();
@@ -1087,7 +1087,10 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                     onDragStart={placedTile ? ()=>handleDragFromBoard(r,c) : undefined}
                   >
                     {permanentTile ? (
-                      <div style={{ width:CELL-3, height:CELL-3, background:lastMoveSquares.has(key)?"#C8E6C9":"#F5E6B8", borderRadius:4, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", position:"relative", boxShadow:lastMoveSquares.has(key)?"inset 0 -2px 0 rgba(0,0,0,0.15), 0 0 0 1.5px #66BB6A":"inset 0 -2px 0 rgba(0,0,0,0.15)" }}>
+                      <div style={{ width:CELL-3, height:CELL-3, background:"#F5E6B8", borderRadius:4, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", position:"relative", boxShadow:"inset 0 -2px 0 rgba(0,0,0,0.15)",
+                        outline: lastMoveSquares.has(key) ? "2.5px solid #3B5EC6" : "none",
+                        outlineOffset: lastMoveSquares.has(key) ? "1px" : "0",
+                        zIndex: lastMoveSquares.has(key) ? 2 : 1 }}>
                         <span style={{ fontSize:16, fontWeight:900, color:"#2C1810", fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1, marginTop:2 }}>
                           {permanentTile==="_" ? "" : permanentTile}
                         </span>
