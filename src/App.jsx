@@ -1065,6 +1065,23 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
 
         <div style={{ border:`2px solid ${P.boardBorder}`, borderRadius:6, overflow:"auto", maxWidth:"100vw", boxShadow:"0 4px 16px rgba(0,0,0,0.4)", background:P.boardBg }}>
           <div style={{ display:"grid", gridTemplateColumns:`repeat(15, ${CELL}px)`, gridTemplateRows:`repeat(15, ${CELL}px)`, gap:2, background:P.boardBg, padding:2, position:"relative" }}>
+            {/* Score preview bubble while placing */}
+            {Object.keys(placed).length > 0 && wordValidations.length > 0 && wordValidations.every(w=>w.valid) && (() => {
+              const S = CELL + 2, PAD = 2;
+              const keys = Object.keys(placed);
+              const cols = keys.map(k=>+k.split(",")[1]);
+              const rows = keys.map(k=>+k.split(",")[0]);
+              const score = calculateScore();
+              const bubbleX = PAD + (Math.max(...cols)+1)*S + 4;
+              const bubbleY = PAD + Math.min(...rows)*S;
+              const totalW = 15*S + PAD, totalH = 15*S + PAD;
+              return (
+                <svg style={{ position:"absolute", top:0, left:0, width:totalW, height:totalH, pointerEvents:"none", zIndex:6 }}>
+                  <rect x={bubbleX} y={bubbleY} width={44} height={22} rx={11} fill="#E67E22" />
+                  <text x={bubbleX+22} y={bubbleY+15} textAnchor="middle" fill="#fff" fontSize={11} fontWeight={800}>+{score}</text>
+                </svg>
+              );
+            })()}
             {BOARD_LAYOUT.map((row, r) =>
               row.map((type, c) => {
                 const key = `${r},${c}`;
@@ -1176,8 +1193,15 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
             {!swapMode && Object.keys(placed).length > 0 && (
               <>
                 <button style={{ ...styles.btnSecondary, fontSize:13 }} onClick={recallTiles}>Recall</button>
-                <div style={{ fontSize:13, color:wordValidations.length>0&&wordValidations.every(w=>w.valid)?P.gold:P.red, fontWeight:700, display:"flex", alignItems:"center", gap:4 }}>
-                  {wordValidations.length>0&&wordValidations.every(w=>w.valid)?`+${calculateScore()} pts`:"Invalid word"}
+                <div style={{ fontSize:13, fontWeight:700, display:"flex", alignItems:"center", gap:4,
+                  color: wordValidations.length===0 ? P.muted : wordValidations.every(w=>w.valid) ? P.gold : P.red }}>
+                  {wordValidations.length===0
+                    ? "Checking…"
+                    : wordValidations.every(w=>w.valid)
+                      ? `+${calculateScore()} pts`
+                      : wordValidations.some(w=>!w.word)
+                        ? "Tiles must be in a line"
+                        : `"${wordValidations.find(w=>!w.valid)?.word}" is not valid`}
                 </div>
                 {isMyTurn && (
                   <button style={{ ...styles.btnPrimary, fontSize:13, padding:"8px 20px",
