@@ -1087,10 +1087,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                     onDragStart={placedTile ? ()=>handleDragFromBoard(r,c) : undefined}
                   >
                     {permanentTile ? (
-                      <div style={{ width:CELL-3, height:CELL-3, background:"#F5E6B8", borderRadius:4, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", position:"relative", boxShadow:"inset 0 -2px 0 rgba(0,0,0,0.15)",
-                        outline: lastMoveSquares.has(key) ? "2.5px solid #3B5EC6" : "none",
-                        outlineOffset: lastMoveSquares.has(key) ? "1px" : "0",
-                        zIndex: lastMoveSquares.has(key) ? 2 : 1 }}>
+                      <div style={{ width:CELL-3, height:CELL-3, background:"#F5E6B8", borderRadius:4, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", position:"relative", boxShadow:"inset 0 -2px 0 rgba(0,0,0,0.15)" }}>
                         <span style={{ fontSize:16, fontWeight:900, color:"#2C1810", fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1, marginTop:2 }}>
                           {permanentTile==="_" ? "" : permanentTile}
                         </span>
@@ -1111,13 +1108,41 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
               })
             )}
           </div>
-          {lastMoveScore !== null && lastMoveSquares.size > 0 && (() => {
+          {lastMoveSquares.size > 0 && (() => {
+            const S = CELL + 2; // cell stride (size + gap)
+            const PAD = 2;      // board padding
             const keys = [...lastMoveSquares];
-            const rows = keys.map(k => +k.split(",")[0]);
-            const cols = keys.map(k => +k.split(",")[1]);
-            const bubbleTop = Math.min(...rows) * (CELL+2);
-            const bubbleLeft = (Math.max(...cols)+1) * (CELL+2);
-            return <div style={{ position:"absolute", top:bubbleTop, left:bubbleLeft, background:"#1D3163", color:"#fff", borderRadius:12, padding:"3px 8px", fontSize:12, fontWeight:800, pointerEvents:"none", zIndex:10, boxShadow:"0 2px 6px rgba(0,0,0,0.4)", whiteSpace:"nowrap" }}>+{lastMoveScore}</div>;
+            const set = lastMoveSquares;
+            // Collect exposed edges: for each tile, check each of 4 sides
+            const edges = [];
+            keys.forEach(key => {
+              const [r,c] = key.split(",").map(Number);
+              const x = PAD + c*S, y = PAD + r*S;
+              if (!set.has(`${r-1},${c}`)) edges.push([x, y, x+CELL, y]);           // top
+              if (!set.has(`${r+1},${c}`)) edges.push([x, y+CELL, x+CELL, y+CELL]); // bottom
+              if (!set.has(`${r},${c-1}`)) edges.push([x, y, x, y+CELL]);           // left
+              if (!set.has(`${r},${c+1}`)) edges.push([x+CELL, y, x+CELL, y+CELL]); // right
+            });
+            const rows = keys.map(k=>+k.split(",")[0]);
+            const cols = keys.map(k=>+k.split(",")[1]);
+            const minR=Math.min(...rows), maxC=Math.max(...cols);
+            const bubbleX = PAD + (maxC+1)*S + 2;
+            const bubbleY = PAD + minR*S;
+            const totalW = 15*S + PAD;
+            const totalH = 15*S + PAD;
+            return (
+              <svg style={{ position:"absolute", top:0, left:0, width:totalW, height:totalH, pointerEvents:"none", zIndex:5 }}>
+                {edges.map(([x1,y1,x2,y2],i) => (
+                  <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#3B5EC6" strokeWidth={3} strokeLinecap="round" />
+                ))}
+                {lastMoveScore !== null && (
+                  <g>
+                    <rect x={bubbleX} y={bubbleY} width={36} height={20} rx={10} fill="#1D3163" />
+                    <text x={bubbleX+18} y={bubbleY+14} textAnchor="middle" fill="#fff" fontSize={11} fontWeight={800}>+{lastMoveScore}</text>
+                  </g>
+                )}
+              </svg>
+            );
           })()}
         </div>
         </div>
