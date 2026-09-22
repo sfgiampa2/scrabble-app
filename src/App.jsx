@@ -1119,20 +1119,37 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
             )}
           </div>
           {lastMoveSquares.size > 0 && (() => {
-            const S = CELL + 2;
+            const S = CELL + 2; // stride = cell + gap
+            const GAP = 2;
             const PAD = 2;
-            const O = 2; // inset to hug tile
+            // Each tile occupies [PAD + c*S, PAD + c*S + CELL] in x
+            // The border should sit in the GAP between tiles, not on the tile itself
+            // For exposed edges: draw line at the midpoint of the gap outside the tile
             const keys = [...lastMoveSquares];
             const set = lastMoveSquares;
             const edges = [];
             keys.forEach(key => {
               const [r,c] = key.split(",").map(Number);
-              const x = PAD + c*S + O, y = PAD + r*S + O;
-              const W = CELL - O*2, H = CELL - O*2;
-              if (!set.has(`${r-1},${c}`)) edges.push([x, y, x+W, y]);
-              if (!set.has(`${r+1},${c}`)) edges.push([x, y+H, x+W, y+H]);
-              if (!set.has(`${r},${c-1}`)) edges.push([x, y, x, y+H]);
-              if (!set.has(`${r},${c+1}`)) edges.push([x+W, y, x+W, y+H]);
+              const cx = PAD + c*S;  // tile left
+              const cy = PAD + r*S;  // tile top
+              const hasT = set.has(`${r-1},${c}`);
+              const hasB = set.has(`${r+1},${c}`);
+              const hasL = set.has(`${r},${c-1}`);
+              const hasR = set.has(`${r},${c+1}`);
+              // Line sits 1px outside the tile (in the gap)
+              const T = cy - 1;         // top border y
+              const B = cy + CELL + 1;  // bottom border y
+              const L = cx - 1;         // left border x
+              const R = cx + CELL + 1;  // right border x
+              // Horizontal segments extend to meet corners
+              const x0 = hasL ? cx - GAP/2 - 1 : L;
+              const x1 = hasR ? cx + CELL + GAP/2 + 1 : R;
+              const y0 = hasT ? cy - GAP/2 - 1 : T;
+              const y1 = hasB ? cy + CELL + GAP/2 + 1 : B;
+              if (!hasT) edges.push([x0, T, x1, T]);
+              if (!hasB) edges.push([x0, B, x1, B]);
+              if (!hasL) edges.push([L, y0, L, y1]);
+              if (!hasR) edges.push([R, y0, R, y1]);
             });
             const rows = keys.map(k=>+k.split(",")[0]);
             const cols = keys.map(k=>+k.split(",")[1]);
