@@ -635,7 +635,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
 
   function handleSquareClick(row, col) {
     const key = `${row},${col}`;
-    if (Object.keys(placed).length === 0) setLastMoveSquares(new Set()); // clear highlight on first placement
+    if (Object.keys(placed).length === 0) { setLastMoveSquares(new Set()); setLastMoveScore(null); setLastMoveWords([]); }
     if (board[key]) return; // already has permanent tile
     if (placed[key]) {
       // Remove tile back to rack
