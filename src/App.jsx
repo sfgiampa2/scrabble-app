@@ -940,6 +940,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
   const CELL = 42;
 
   const [showResign, setShowResign] = useState(false);
+  const [showPassConfirm, setShowPassConfirm] = useState(false);
   const [soundOn, setSoundOn] = useState(localStorage.getItem("scrabbleSoundOff") !== "true");
 
   function toggleSound() {
