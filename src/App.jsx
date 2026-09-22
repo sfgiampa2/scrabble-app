@@ -869,7 +869,8 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     const nextPlayer = players[nextIdx];
     // Save move
     await supabase.from("moves").insert({ id:generateId(), game_id:gameId, player_id:myPlayer?.id, tiles_placed:placed, words_formed:words.map(w=>w.word), score, move_type:"play" });
-    await supabase.from("games").update({ board:newBoard, bag:remaining, current_player:nextPlayer.id, turn_number:(game.turn_number||0)+1 }).eq("id",gameId);
+    const allWordSquares = [...new Set(words.flatMap(w => w.squares.map(({r,c}) => `${r},${c}`)))];
+    await supabase.from("games").update({ board:newBoard, bag:remaining, current_player:nextPlayer.id, turn_number:(game.turn_number||0)+1, last_move:{ squares:allWordSquares, score, player:myPlayer?.name } }).eq("id",gameId);
     await supabase.from("game_players").update({ rack:newRack, score:(scores[myPlayer?.id]||0)+score }).eq("id",myPlayer?.id);
     setMyRack(newRack);
     setPlaced({});
@@ -1060,8 +1061,8 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
               </div>
             );
           })}
-        <div style={{ border:"2px solid #34495E", borderRadius:8, overflow:"auto", maxWidth:"100vw", boxShadow:"0 8px 32px rgba(0,0,0,0.7)", background:"#1a2530" }}>
-          <div style={{ display:"grid", gridTemplateColumns:`repeat(15, ${CELL}px)`, gridTemplateRows:`repeat(15, ${CELL}px)`, gap:1, background:"#1a2530", padding:3 }}>
+        <div style={{ border:`2px solid ${P.boardBorder}`, borderRadius:6, overflow:"auto", maxWidth:"100vw", boxShadow:"0 4px 16px rgba(0,0,0,0.4)", background:P.boardBg }}>
+          <div style={{ display:"grid", gridTemplateColumns:`repeat(15, ${CELL}px)`, gridTemplateRows:`repeat(15, ${CELL}px)`, gap:2, background:P.boardBg, padding:2, position:"relative" }}>
             {BOARD_LAYOUT.map((row, r) =>
               row.map((type, c) => {
                 const key = `${r},${c}`;
@@ -1104,6 +1105,14 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
               })
             )}
           </div>
+          {lastMoveScore !== null && lastMoveSquares.size > 0 && (() => {
+            const keys = [...lastMoveSquares];
+            const rows = keys.map(k => +k.split(",")[0]);
+            const cols = keys.map(k => +k.split(",")[1]);
+            const bubbleTop = Math.min(...rows) * (CELL+2);
+            const bubbleLeft = (Math.max(...cols)+1) * (CELL+2);
+            return <div style={{ position:"absolute", top:bubbleTop, left:bubbleLeft, background:"#1D3163", color:"#fff", borderRadius:12, padding:"3px 8px", fontSize:12, fontWeight:800, pointerEvents:"none", zIndex:10, boxShadow:"0 2px 6px rgba(0,0,0,0.4)", whiteSpace:"nowrap" }}>+{lastMoveScore}</div>;
+          })()}
         </div>
         </div>
 
