@@ -576,6 +576,16 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     if (Object.keys(placed).length === 0) { setWordStatus({}); setWordValidations([]); return; }
     const unassigned = Object.entries(placed).filter(([k,t]) => t.letter==="_" && !blankAssignments[k] && !t.assignedLetter);
     if (unassigned.length > 0) { setWordStatus({}); setWordValidations([]); return; }
+    // Check tiles in a line — gray out button if not
+    const placedKeys = Object.keys(placed);
+    if (placedKeys.length > 1) {
+      const pRows = placedKeys.map(k=>+k.split(",")[0]);
+      const pCols = placedKeys.map(k=>+k.split(",")[1]);
+      if (!pRows.every(r=>r===pRows[0]) && !pCols.every(c=>c===pCols[0])) {
+        setWordValidations([{ word:"", squares:[], valid:false, score:0 }]);
+        setWordStatus({}); return;
+      }
+    }
     const words = getPlacedWords();
     if (words.length === 0) { setWordValidations([]); return; }
     const totalScore = calculateScore();
@@ -1109,19 +1119,20 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
             )}
           </div>
           {lastMoveSquares.size > 0 && (() => {
-            const S = CELL + 2; // cell stride (size + gap)
-            const PAD = 2;      // board padding
+            const S = CELL + 2;
+            const PAD = 2;
+            const O = 2; // inset to hug tile
             const keys = [...lastMoveSquares];
             const set = lastMoveSquares;
-            // Collect exposed edges: for each tile, check each of 4 sides
             const edges = [];
             keys.forEach(key => {
               const [r,c] = key.split(",").map(Number);
-              const x = PAD + c*S, y = PAD + r*S;
-              if (!set.has(`${r-1},${c}`)) edges.push([x, y, x+CELL, y]);           // top
-              if (!set.has(`${r+1},${c}`)) edges.push([x, y+CELL, x+CELL, y+CELL]); // bottom
-              if (!set.has(`${r},${c-1}`)) edges.push([x, y, x, y+CELL]);           // left
-              if (!set.has(`${r},${c+1}`)) edges.push([x+CELL, y, x+CELL, y+CELL]); // right
+              const x = PAD + c*S + O, y = PAD + r*S + O;
+              const W = CELL - O*2, H = CELL - O*2;
+              if (!set.has(`${r-1},${c}`)) edges.push([x, y, x+W, y]);
+              if (!set.has(`${r+1},${c}`)) edges.push([x, y+H, x+W, y+H]);
+              if (!set.has(`${r},${c-1}`)) edges.push([x, y, x, y+H]);
+              if (!set.has(`${r},${c+1}`)) edges.push([x+W, y, x+W, y+H]);
             });
             const rows = keys.map(k=>+k.split(",")[0]);
             const cols = keys.map(k=>+k.split(",")[1]);
