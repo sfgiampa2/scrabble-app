@@ -458,7 +458,7 @@ function JoinView({ gameId: initialGameId, onJoin, loading }) {
           onClick={doJoin} disabled={loading||(!code&&!initialGameId)}>
           {loading ? "Joining…" : "Join Game"}
         </button>
-        <button style={{ ...styles.btnSecondary, width:"100%", marginTop:8 }} onClick={()=>window.history.back()}>← Back</button>
+        <button style={{ ...styles.btnSecondary, width:"100%", marginTop:8 }} onClick={()=>window.location.href="/"}>← Back to Home</button>
       </div>
     </div>
   );
@@ -748,7 +748,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     const allTiles = { ...board };
     Object.entries(placed).forEach(([key, t]) => {
       // Use assignedLetter from tile first, then blankAssignments, then A
-      allTiles[key] = t.letter === "_" ? (t.assignedLetter || blankAssignments[key] || "A") : t.letter;
+      allTiles[key] = t.letter === "_" ? (t.assignedLetter || blankAssignments[key] || "A").toUpperCase() : t.letter.toUpperCase();
     });
     const words = [];
     const placedKeys = Object.keys(placed);
@@ -779,7 +779,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
 
   function getTileEffectiveLetter(key) {
     if (placed[key]?.letter === "_") return placed[key].assignedLetter || blankAssignments[key] || "A";
-    if (board[key]) return board[key] === "_" ? "A" : board[key];
+    if (board[key]) return board[key] === "_" ? "A" : board[key].toUpperCase();
     return placed[key]?.letter || "";
   }
 
@@ -862,19 +862,33 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     if (!isFirstMove) {
       const { data: freshBoardData } = await supabase.from("games").select("board").eq("id",gameId).single();
       const freshBoard = freshBoardData?.board || board;
-      // Build combined board (existing + placed) to check full word connectivity
+      // Build combined: existing board + placed tiles
       const combined = { ...freshBoard };
       Object.keys(placed).forEach(k => { combined[k] = "X"; });
-      // Every placed tile must be reachable from at least one existing board tile
-      let connected = false;
-      Object.keys(placed).forEach(key => {
+      // ALL placed tiles must be reachable from existing board tiles via the combined grid
+      // Do a flood fill from any existing board tile adjacent to any placed tile
+      const placedSet = new Set(Object.keys(placed));
+      const visited = new Set();
+      const queue = [];
+      // Seed: placed tiles that directly touch existing board
+      placedSet.forEach(key => {
         const [r,c] = key.split(",").map(Number);
-        if (freshBoard[`${r-1},${c}`]||freshBoard[`${r+1},${c}`]||freshBoard[`${r},${c-1}`]||freshBoard[`${r},${c+1}`]) connected = true;
-        // Also check if an existing tile bridges through placed tiles to another existing tile
+        const neighbors = [`${r-1},${c}`,`${r+1},${c}`,`${r},${c-1}`,`${r},${c+1}`];
+        if (neighbors.some(n => freshBoard[n] && !placedSet.has(n))) {
+          queue.push(key); visited.add(key);
+        }
       });
-      // Also check: walk the word — if any placed tile is adjacent to existing tile, word is connected
-      // More thorough: require that at least one placed tile touches an existing board tile
-      if (!connected) { notify("Tiles must connect to existing words","error"); return; }
+      // BFS through placed tiles connected to each other
+      while (queue.length) {
+        const cur = queue.shift();
+        const [r,c] = cur.split(",").map(Number);
+        [`${r-1},${c}`,`${r+1},${c}`,`${r},${c-1}`,`${r},${c+1}`].forEach(n => {
+          if (placedSet.has(n) && !visited.has(n)) { visited.add(n); queue.push(n); }
+        });
+      }
+      // All placed tiles must be in visited
+      const allConnected = [...placedSet].every(k => visited.has(k));
+      if (!allConnected || visited.size === 0) { notify("All tiles must connect to existing words","error"); return; }
     }
     setValidating(true);
     const words = getPlacedWords();
@@ -889,8 +903,8 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     const newBoard = { ...board };
     Object.entries(placed).forEach(([key,t]) => {
       if (t.letter==="_") {
-        newBoard[key] = t.assignedLetter||blankAssignments[key]||"A";
-        newBoard[key+"_blank"] = true;
+        // Store as lowercase — TILE_VALUES has no lowercase keys so value = 0
+        newBoard[key] = (t.assignedLetter||blankAssignments[key]||"A").toLowerCase();
       } else { newBoard[key] = t.letter; }
     });
     // Draw new tiles
@@ -904,7 +918,14 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     const nextIdx = (myIdx+1) % players.length;
     const nextPlayer = players[nextIdx];
     // Save move
-    await supabase.from("moves").insert({ id:generateId(), game_id:gameId, player_id:myPlayer?.id, tiles_placed:placed, words_formed:words.map(w=>w.word), score, move_type:"play" });
+    // Check if any placed tile landed on a special square
+    const specialSquares = Object.keys(placed).map(key => {
+      const [r,c] = key.split(",").map(Number);
+      const type = BOARD_LAYOUT[r]?.[c];
+      return type && type !== "" ? type : null;
+    }).filter(Boolean);
+    const uniqueSpecials = [...new Set(specialSquares)];
+    await supabase.from("moves").insert({ id:generateId(), game_id:gameId, player_id:myPlayer?.id, tiles_placed:placed, words_formed:words.map(w=>w.word), score, move_type:"play", special_squares:uniqueSpecials });
     const lastMoveWords = words.map(w => ({ word:w.word, squares:w.squares.map(({r,c})=>({r,c})) }));
     await supabase.from("games").update({ board:newBoard, bag:remaining, current_player:nextPlayer.id, turn_number:(game.turn_number||0)+1, last_move:{ words:lastMoveWords, score, player:myPlayer?.name } }).eq("id",gameId);
     await supabase.from("game_players").update({ rack:newRack, score:(scores[myPlayer?.id]||0)+score }).eq("id",myPlayer?.id);
@@ -1125,7 +1146,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                 const canDrop = !permanentTile && !placedTile;
                 return (
                   <div key={key}
-                    style={{ width:CELL, height:CELL, background:sq.bg, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", position:"relative", fontSize:11, fontWeight:900, color:sq.color, borderRadius:3, transition:"all 0.15s",
+                    style={{ width:CELL, height:CELL, background:permanentTile||placedTile?"transparent":sq.bg, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", position:"relative", fontSize:11, fontWeight:900, color:sq.color, borderRadius:3, transition:"all 0.15s",
                       outline: placedTile ? `2px solid ${wordStatus[key]?.valid===true?"#27AE60":wordStatus[key]?.valid===false?"#E21D38":P.gold}` : "none",
                       boxShadow: placedTile && wordStatus[key]?.valid===true ? "0 0 8px rgba(39,174,96,0.4)" : placedTile && wordStatus[key]?.valid===false ? "0 0 8px rgba(226,29,56,0.4)" : placedTile ? `0 0 8px ${P.gold}44` : "none",
                       letterSpacing:-0.5 }}
@@ -1136,11 +1157,11 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                     onDragStart={placedTile ? ()=>handleDragFromBoard(r,c) : undefined}
                   >
                     {permanentTile ? (
-                      <div style={{ width:CELL-2, height:CELL-2, background:"#F5E6B8", borderRadius:3, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", position:"relative", boxShadow:"inset 0 -2px 0 rgba(0,0,0,0.15)" }}>
-                        <span style={{ fontSize:16, fontWeight:900, color:"#2C1810", fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1, marginTop:2 }}>
-                          {permanentTile==="_" ? "" : permanentTile}
+                      <div style={{ width:CELL-2, height:CELL-2, background:"#F5E6B8", borderRadius:4, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", position:"relative", boxShadow:"inset 0 -2px 0 rgba(0,0,0,0.15)" }}>
+                        <span style={{ fontSize:16, fontWeight:900, color:permanentTile===permanentTile?.toLowerCase()&&permanentTile!="_"?"#888":"#2C1810", fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1, marginTop:2 }}>
+                          {permanentTile==="_" ? "" : permanentTile.toUpperCase()}
                         </span>
-                        <span style={{ fontSize:7, color:"#5D3A1A", lineHeight:1, fontWeight:700, position:"absolute", bottom:2, right:3 }}>{board[key+"_blank"]?"0":TILE_VALUES[permanentTile]||""}</span>
+                        <span style={{ fontSize:7, color:"#5D3A1A", lineHeight:1, fontWeight:700, position:"absolute", bottom:2, right:3 }}>{permanentTile===permanentTile?.toLowerCase()&&permanentTile!="_"?"0":TILE_VALUES[permanentTile?.toUpperCase()]||""}</span>
                       </div>
                     ) : placedTile ? (
                       <div style={{ width:CELL-3, height:CELL-3, background:"#FFF8DC", borderRadius:4, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:"pointer", position:"relative", boxShadow:`0 0 0 2px ${wordStatus[key]?.valid===false?"#E21D38":P.gold}, inset 0 -2px 0 rgba(0,0,0,0.1)` }} onClick={()=>{ if(placedTile.letter==="_"&&!(placedTile.assignedLetter||blankAssignments[key])){ setBlankPicker({row:r,col:c}); return; } handleSquareClick(r,c); }}>
@@ -1165,7 +1186,9 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
             const firstWord = lastMoveWords[0];
             const fCols = firstWord.squares.map(s=>s.c);
             const fRows = firstWord.squares.map(s=>s.r);
-            const bubbleX = PAD + (Math.max(...fCols)+1)*S + 4;
+            const BW = 44;
+            const rawBubbleX = PAD + (Math.max(...fCols)+1)*S + 4;
+            const bubbleX = rawBubbleX + BW > totalW ? PAD + Math.min(...fCols)*S - BW - 4 : rawBubbleX;
             const bubbleY = PAD + Math.min(...fRows)*S;
             return (
               <svg style={{ position:"absolute", top:0, left:0, width:totalW, height:totalH, pointerEvents:"none", zIndex:5 }}>
@@ -1180,7 +1203,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                 })}
                 {lastMoveScore !== null && (() => {
                   const BW=44, safeX=bubbleX+BW>totalW-4?bubbleX-BW-8:bubbleX;
-                  return <g><rect x={safeX} y={bubbleY} width={BW} height={22} rx={11} fill="#1D3163"/><text x={safeX+BW/2} y={bubbleY+15} textAnchor="middle" fill="#fff" fontSize={11} fontWeight={800}>+{lastMoveScore}</text></g>;
+                  return <g><rect x={bubbleX} y={bubbleY} width={BW} height={22} rx={11} fill="#1D3163"/><text x={bubbleX+BW/2} y={bubbleY+15} textAnchor="middle" fill="#fff" fontSize={11} fontWeight={800}>+{lastMoveScore}</text></g>;
                 })()}
               </svg>
             );
@@ -1315,7 +1338,15 @@ function MoveHistory({ gameId, players, compact }) {
           {m.move_type==="pass" && <span style={{ color:P.muted, fontSize:10 }}>passed</span>}
           {m.move_type==="swap" && <span style={{ color:P.muted, fontSize:10 }}>swapped</span>}
           {m.move_type==="resign" && <span style={{ color:P.red, fontSize:10, fontWeight:700 }}>resigned</span>}
-          {m.move_type==="play" && <span style={{ color:"#27AE60", fontWeight:800, fontSize:12 }}>+{m.score}</span>}
+          {m.move_type==="play" && (
+            <div style={{ display:"flex", alignItems:"center", gap:4, marginLeft:"auto" }}>
+              {(m.special_squares||[]).map((sq,i) => {
+                const colors = { TW:"#C1544A", DW:"#E8A598", TL:"#3B8EA5", DL:"#A8CFDD", ST:"#C1544A" };
+                return <span key={i} style={{ background:colors[sq]||"#999", color:"#fff", fontSize:9, fontWeight:800, borderRadius:4, padding:"1px 4px" }}>{sq}</span>;
+              })}
+              <span style={{ color:"#27AE60", fontWeight:800, fontSize:12 }}>+{m.score}</span>
+            </div>
+          )}
         </div>
         {m.move_type==="play" && (
           <div style={{ display:"flex", flexDirection:"column", gap:3, paddingLeft:14 }}>
