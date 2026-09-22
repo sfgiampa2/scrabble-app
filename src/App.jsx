@@ -1130,27 +1130,28 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
             const edges = [];
             keys.forEach(key => {
               const [r,c] = key.split(",").map(Number);
-              const cx = PAD + c*S;  // tile left
-              const cy = PAD + r*S;  // tile top
+              const cx = PAD + c*S;
+              const cy = PAD + r*S;
               const hasT = set.has(`${r-1},${c}`);
               const hasB = set.has(`${r+1},${c}`);
               const hasL = set.has(`${r},${c-1}`);
               const hasR = set.has(`${r},${c+1}`);
-              // Border sits exactly on tile edge
-              const T = cy;             // top
-              const B = cy + CELL;      // bottom
-              const L = cx;             // left
-              const R = cx + CELL;      // right
-              // Extend into gap to connect with adjacent tile borders
-              const ext = GAP + 1;
-              const x0 = hasL ? cx - ext : L;
-              const x1 = hasR ? cx + CELL + ext : R;
-              const y0 = hasT ? cy - ext : T;
-              const y1 = hasB ? cy + CELL + ext : B;
-              if (!hasT) edges.push([x0, T, x1, T]);
-              if (!hasB) edges.push([x0, B, x1, B]);
-              if (!hasL) edges.push([L, y0, L, y1]);
-              if (!hasR) edges.push([R, y0, R, y1]);
+              const T = cy, B = cy+CELL, L = cx, R = cx+CELL;
+              const ext = GAP+1;
+              // Exposed edges — extend into gap when neighbor exists to bridge across gap
+              if (!hasT) edges.push([hasL?L-ext:L, T, hasR?R+ext:R, T]);
+              if (!hasB) edges.push([hasL?L-ext:L, B, hasR?R+ext:R, B]);
+              if (!hasL) edges.push([L, hasT?T-ext:T, L, hasB?B+ext:B]);
+              if (!hasR) edges.push([R, hasT?T-ext:T, R, hasB?B+ext:B]);
+              // Concave inner corners — fill the gap at inside bends of L-shapes
+              // Top-left inner corner: tile has top AND left neighbors but NOT top-left diagonal
+              if (hasT && hasL && !set.has(`${r-1},${c-1}`)) edges.push([L-ext, T-ext, L, T-ext]);
+              // Top-right inner corner
+              if (hasT && hasR && !set.has(`${r-1},${c+1}`)) edges.push([R, T-ext, R+ext, T-ext]);
+              // Bottom-left inner corner
+              if (hasB && hasL && !set.has(`${r+1},${c-1}`)) edges.push([L-ext, B+ext, L, B+ext]);
+              // Bottom-right inner corner
+              if (hasB && hasR && !set.has(`${r+1},${c+1}`)) edges.push([R, B+ext, R+ext, B+ext]);
             });
             const rows = keys.map(k=>+k.split(",")[0]);
             const cols = keys.map(k=>+k.split(",")[1]);
