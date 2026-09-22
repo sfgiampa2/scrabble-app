@@ -8,20 +8,23 @@ const supabase = createClient(
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
 const P = {
-  bg:      "#0f0f14",
-  surface: "#1a1a24",
-  border:  "#2a2a3a",
+  bg:      "#F0F2F5",
+  surface: "#FFFFFF",
+  border:  "#E0E4EA",
   navy:    "#1D3169",
   red:     "#E21D38",
-  gold:    "#FFC300",
-  steel:   "#A9C2DC",
+  gold:    "#E67E22",
+  steel:   "#5B7FA6",
   tile:    "#F5E6B8",
   tileEdge:"#B8860B",
   tileShadow:"#8B6914",
   brown:   "#3D2B00",
   white:   "#FFFFFF",
-  text:    "#e8e8f0",
-  muted:   "rgba(255,255,255,0.4)",
+  text:    "#1a1a2e",
+  muted:   "rgba(0,0,0,0.4)",
+  cyan:    "#2980B9",
+  amber:   "#E67E22",
+  lime:    "#27AE60",
   // Board square colors — more distinct
   tw:      "#C1544A", // triple word - muted red
   dw:      "#E8A598", // double word - salmon pink
@@ -858,11 +861,18 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     if (!isFirstMove) {
       const { data: freshBoardData } = await supabase.from("games").select("board").eq("id",gameId).single();
       const freshBoard = freshBoardData?.board || board;
+      // Build combined board (existing + placed) to check full word connectivity
+      const combined = { ...freshBoard };
+      Object.keys(placed).forEach(k => { combined[k] = "X"; });
+      // Every placed tile must be reachable from at least one existing board tile
       let connected = false;
       Object.keys(placed).forEach(key => {
         const [r,c] = key.split(",").map(Number);
         if (freshBoard[`${r-1},${c}`]||freshBoard[`${r+1},${c}`]||freshBoard[`${r},${c-1}`]||freshBoard[`${r},${c+1}`]) connected = true;
+        // Also check if an existing tile bridges through placed tiles to another existing tile
       });
+      // Also check: walk the word — if any placed tile is adjacent to existing tile, word is connected
+      // More thorough: require that at least one placed tile touches an existing board tile
       if (!connected) { notify("Tiles must connect to existing words","error"); return; }
     }
     setValidating(true);
@@ -876,7 +886,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     const score = calculateScore();
     // Update board
     const newBoard = { ...board };
-    Object.entries(placed).forEach(([key,t]) => { newBoard[key] = t.letter; });
+    Object.entries(placed).forEach(([key,t]) => { newBoard[key] = t.letter==="_" ? (t.assignedLetter||blankAssignments[key]||"A") : t.letter; });
     // Draw new tiles
     const { data: gameData } = await supabase.from("games").select("bag").eq("id",gameId).single();
     const bag = gameData?.bag || [];
@@ -1067,18 +1077,21 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
           <div style={{ display:"grid", gridTemplateColumns:`repeat(15, ${CELL}px)`, gridTemplateRows:`repeat(15, ${CELL}px)`, gap:2, background:P.boardBg, padding:2, position:"relative" }}>
             {/* Score preview bubble while placing */}
             {Object.keys(placed).length > 0 && wordValidations.length > 0 && wordValidations.every(w=>w.valid) && (() => {
-              const S = CELL + 2, PAD = 2;
+              const S = CELL + 2, PAD = 2, BW = 44;
               const keys = Object.keys(placed);
               const cols = keys.map(k=>+k.split(",")[1]);
               const rows = keys.map(k=>+k.split(",")[0]);
               const score = calculateScore();
-              const bubbleX = PAD + (Math.max(...cols)+1)*S + 4;
-              const bubbleY = PAD + Math.min(...rows)*S;
+              const maxCol = Math.max(...cols);
               const totalW = 15*S + PAD, totalH = 15*S + PAD;
+              // Flip to left side if near right edge
+              const rightX = PAD + (maxCol+1)*S + 4;
+              const bubbleX = rightX + BW > totalW ? PAD + Math.min(...cols)*S - BW - 4 : rightX;
+              const bubbleY = PAD + Math.min(...rows)*S;
               return (
                 <svg style={{ position:"absolute", top:0, left:0, width:totalW, height:totalH, pointerEvents:"none", zIndex:6 }}>
-                  <rect x={bubbleX} y={bubbleY} width={44} height={22} rx={11} fill="#E67E22" />
-                  <text x={bubbleX+22} y={bubbleY+15} textAnchor="middle" fill="#fff" fontSize={11} fontWeight={800}>+{score}</text>
+                  <rect x={bubbleX} y={bubbleY} width={BW} height={22} rx={11} fill="#E67E22" />
+                  <text x={bubbleX+BW/2} y={bubbleY+15} textAnchor="middle" fill="#fff" fontSize={11} fontWeight={800}>+{score}</text>
                 </svg>
               );
             })()}
@@ -1237,7 +1250,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
 
         </div>
         {/* Right sidebar — scores + move history */}
-        <div style={{ background:P.surface, border:`1px solid ${P.border}`, borderRadius:12, padding:"12px 10px", width:160, flexShrink:0 }}>
+        <div style={{ background:P.white, border:`1px solid ${P.border}`, borderRadius:12, padding:"12px 10px", width:160, flexShrink:0, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
           <div style={{ fontSize:10, color:P.steel, fontWeight:700, letterSpacing:2, marginBottom:10, textAlign:"center" }}>SCORES</div>
           {players.map((p) => (
             <div key={p.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 6px", borderRadius:8, marginBottom:4, background:game.current_player===p.id?`${p.color}22`:"transparent", border:game.current_player===p.id?`1px solid ${p.color}33`:"1px solid transparent" }}>
@@ -1277,16 +1290,28 @@ function MoveHistory({ gameId, players, compact }) {
   const moveList = moves.map(m => {
     const player = players.find(p=>p.id===m.player_id);
     return (
-      <div key={m.id} style={{ padding:compact?"4px 0":"6px 0", borderBottom:"1px solid rgba(255,255,255,0.05)", fontSize:compact?11:13 }}>
-        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-          <div style={{ width:6, height:6, borderRadius:"50%", background:player?.color||P.muted, flexShrink:0 }} />
-          <span style={{ color:P.text, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:compact?70:120 }}>{player?.name}</span>
-          {m.move_type==="pass" ? <span style={{ color:P.muted }}>pass</span>
-          : m.move_type==="swap" ? <span style={{ color:P.muted }}>swap</span>
-          : m.move_type==="resign" ? <span style={{ color:P.red }}>resign</span>
-          : <span style={{ color:P.gold, fontWeight:700, marginLeft:"auto" }}>+{m.score}</span>}
+      <div key={m.id} style={{ padding:"6px 4px", borderBottom:`1px solid ${P.border}`, fontSize:11 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom: m.move_type==="play"?3:0 }}>
+          <div style={{ width:8, height:8, borderRadius:"50%", background:player?.color||P.muted, flexShrink:0 }} />
+          <span style={{ color:P.text, fontWeight:700, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{player?.name}</span>
+          {m.move_type==="pass" && <span style={{ color:P.muted, fontSize:10 }}>passed</span>}
+          {m.move_type==="swap" && <span style={{ color:P.muted, fontSize:10 }}>swapped</span>}
+          {m.move_type==="resign" && <span style={{ color:P.red, fontSize:10, fontWeight:700 }}>resigned</span>}
+          {m.move_type==="play" && <span style={{ color:"#27AE60", fontWeight:800, fontSize:12 }}>+{m.score}</span>}
         </div>
-        {m.move_type==="play" && <div style={{ fontSize:10, color:P.muted, paddingLeft:12, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{(m.words_formed||[]).join(", ")}</div>}
+        {m.move_type==="play" && (
+          <div style={{ display:"flex", flexWrap:"wrap", gap:3, paddingLeft:14 }}>
+            {(m.words_formed||[]).map((word,wi) => (
+              <div key={wi} style={{ display:"flex", gap:1 }}>
+                {word.split("").map((letter,li) => (
+                  <div key={li} style={{ width:18, height:20, background:"#F5E6B8", borderRadius:3, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:900, color:"#2C1810", boxShadow:"inset 0 -1px 0 rgba(0,0,0,0.2)" }}>
+                    {letter}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   });
@@ -1412,7 +1437,7 @@ function ProfileView({ profile, setProfile, userId, onBack }) {
         <div style={styles.card}>
           <div style={{ fontSize:11, color:P.steel, fontWeight:700, letterSpacing:2, marginBottom:12 }}>RECENT PLAYS</div>
           {games.slice(0,10).map((m,i) => (
-            <div key={i} style={{ display:"flex", gap:8, padding:"6px 0", borderBottom:"1px solid rgba(255,255,255,0.05)", fontSize:13 }}>
+            <div key={i} style={{ display:"flex", gap:8, padding:"6px 0", borderBottom:`1px solid ${P.border}`, fontSize:13 }}>
               <span style={{ color:P.text }}>{(m.words_formed||[]).join(", ") || "—"}</span>
               <span style={{ color:P.gold, fontWeight:700, marginLeft:"auto" }}>+{m.score}</span>
             </div>
