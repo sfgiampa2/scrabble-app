@@ -606,16 +606,23 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
   const [lastMoveSquares, setLastMoveSquares] = useState(new Set());
   const [lastMoveScore, setLastMoveScore] = useState(null);
   const [lastMovePlayer, setLastMovePlayer] = useState(null);
+  const [lastMoveWords, setLastMoveWords] = useState([]);
 
   // Sync board from game
   useEffect(() => {
     if (game.board) {
       setBoard(game.board);
     }
-    if (game.last_move?.squares) {
-      setLastMoveSquares(new Set(game.last_move.squares));
+    if (game.last_move?.words) {
+      const allSq = new Set(game.last_move.words.flatMap(w => w.squares.map(({r,c})=>`${r},${c}`)));
+      setLastMoveSquares(allSq);
       setLastMoveScore(game.last_move.score);
       setLastMovePlayer(game.last_move.player);
+      setLastMoveWords(game.last_move.words || []);
+    } else if (game.last_move?.squares) {
+      setLastMoveSquares(new Set(game.last_move.squares));
+      setLastMoveScore(game.last_move.score);
+      setLastMoveWords([]);
     }
     if (game.status === "finished") setGameOver(true);
     // Sync scores
@@ -882,8 +889,8 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     const nextPlayer = players[nextIdx];
     // Save move
     await supabase.from("moves").insert({ id:generateId(), game_id:gameId, player_id:myPlayer?.id, tiles_placed:placed, words_formed:words.map(w=>w.word), score, move_type:"play" });
-    const allWordSquares = [...new Set(words.flatMap(w => w.squares.map(({r,c}) => `${r},${c}`)))];
-    await supabase.from("games").update({ board:newBoard, bag:remaining, current_player:nextPlayer.id, turn_number:(game.turn_number||0)+1, last_move:{ squares:allWordSquares, score, player:myPlayer?.name } }).eq("id",gameId);
+    const lastMoveWords = words.map(w => ({ word:w.word, squares:w.squares.map(({r,c})=>({r,c})) }));
+    await supabase.from("games").update({ board:newBoard, bag:remaining, current_player:nextPlayer.id, turn_number:(game.turn_number||0)+1, last_move:{ words:lastMoveWords, score, player:myPlayer?.name } }).eq("id",gameId);
     await supabase.from("game_players").update({ rack:newRack, score:(scores[myPlayer?.id]||0)+score }).eq("id",myPlayer?.id);
     setMyRack(newRack);
     setPlaced({});
@@ -1055,25 +1062,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
           {/* Board */}
         <div style={{ position:"relative" }}>
           {/* Floating word validation labels */}
-          {wordValidations.map(({ word, squares, valid, score }, wi) => {
-            if (squares.length === 0) return null;
-            const minR = Math.min(...squares.map(s=>s.r));
-            const minC = Math.min(...squares.map(s=>s.c));
-            const maxC = Math.max(...squares.map(s=>s.c));
-            const CELL = 42;
-            const left = minC * (CELL+1) + 3;
-            const top = minR * (CELL+1) + 3 - 22;
-            const width = (maxC - minC + 1) * (CELL+1) - 1;
-            return (
-              <div key={wi} style={{ position:"absolute", left, top, width, zIndex:20, pointerEvents:"none",
-                background: valid ? "rgba(39,174,96,0.9)" : "rgba(226,29,56,0.9)",
-                borderRadius:4, padding:"2px 6px", display:"flex", justifyContent:"space-between", alignItems:"center", fontSize:11, fontWeight:700, color:"#fff", boxShadow:"0 2px 8px rgba(0,0,0,0.4)" }}>
-                <span>{word}</span>
-                {valid && <span>+{score}</span>}
-                {!valid && <span>✗</span>}
-              </div>
-            );
-          })}
+
         <div style={{ border:`2px solid ${P.boardBorder}`, borderRadius:6, overflow:"auto", maxWidth:"100vw", boxShadow:"0 4px 16px rgba(0,0,0,0.4)", background:P.boardBg }}>
           <div style={{ display:"grid", gridTemplateColumns:`repeat(15, ${CELL}px)`, gridTemplateRows:`repeat(15, ${CELL}px)`, gap:2, background:P.boardBg, padding:2, position:"relative" }}>
             {BOARD_LAYOUT.map((row, r) =>
@@ -1118,25 +1107,27 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
               })
             )}
           </div>
-          {lastMoveSquares.size > 0 && (() => {
+          {lastMoveWords.length > 0 && (() => {
             const S = CELL + 2;
             const PAD = 2;
-            const keys = [...lastMoveSquares];
-            const rows = keys.map(k=>+k.split(",")[0]);
-            const cols = keys.map(k=>+k.split(",")[1]);
-            const minR=Math.min(...rows), maxR=Math.max(...rows);
-            const minC=Math.min(...cols), maxC=Math.max(...cols);
-            const x = PAD + minC*S;
-            const y = PAD + minR*S;
-            const w = (maxC-minC)*S + CELL;
-            const h = (maxR-minR)*S + CELL;
             const totalW = 15*S + PAD;
             const totalH = 15*S + PAD;
-            const bubbleX = x + w + 4;
-            const bubbleY = y;
+            const firstWord = lastMoveWords[0];
+            const fCols = firstWord.squares.map(s=>s.c);
+            const fRows = firstWord.squares.map(s=>s.r);
+            const bubbleX = PAD + (Math.max(...fCols)+1)*S + 4;
+            const bubbleY = PAD + Math.min(...fRows)*S;
             return (
               <svg style={{ position:"absolute", top:0, left:0, width:totalW, height:totalH, pointerEvents:"none", zIndex:5 }}>
-                <rect x={x} y={y} width={w} height={h} fill="none" stroke="#3B5EC6" strokeWidth={2.5} rx={3} />
+                {lastMoveWords.map((w, wi) => {
+                  const rs = w.squares.map(s=>s.r), cs = w.squares.map(s=>s.c);
+                  const minR=Math.min(...rs), maxR=Math.max(...rs);
+                  const minC=Math.min(...cs), maxC=Math.max(...cs);
+                  const x = PAD + minC*S, y = PAD + minR*S;
+                  const ww = (maxC-minC)*S + CELL;
+                  const wh = (maxR-minR)*S + CELL;
+                  return <rect key={wi} x={x} y={y} width={ww} height={wh} fill="none" stroke="#3B5EC6" strokeWidth={2.5} rx={3} />;
+                })}
                 {lastMoveScore !== null && (
                   <g>
                     <rect x={bubbleX} y={bubbleY} width={40} height={22} rx={11} fill="#1D3163" />
