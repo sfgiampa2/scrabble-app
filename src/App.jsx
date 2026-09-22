@@ -23,14 +23,14 @@ const P = {
   text:    "#e8e8f0",
   muted:   "rgba(255,255,255,0.4)",
   // Board square colors — more distinct
-  tw:      "#C0392B", // triple word - bold red
-  dw:      "#E8877A", // double word - salmon
-  tl:      "#1A5276", // triple letter - deep blue
-  dl:      "#5DADE2", // double letter - bright blue
-  star:    "#C0392B", // center star
-  normal:  "#2C3E50", // normal square - slate
-  boardBg: "#1a2530", // board background
-  boardBorder: "#34495E",
+  tw:      "#C1544A", // triple word - muted red
+  dw:      "#E8A598", // double word - salmon pink
+  tl:      "#3B8EA5", // triple letter - teal
+  dl:      "#A8CFDD", // double letter - light blue
+  star:    "#C1544A",
+  normal:  "#B0BEC5", // normal square - blue-gray
+  boardBg: "#90A4AE", // board background
+  boardBorder: "#78909C",
 };
 
 const PLAYER_COLORS = ["#2980B9","#E21D38","#8E44AD","#27AE60"];
@@ -98,10 +98,10 @@ function getGameIdFromUrl() {
 
 function getSquareStyle(type) {
   switch(type) {
-    case "TW": return { bg: P.tw,     label: "3W", color: "rgba(255,255,255,0.9)" };
-    case "DW": return { bg: P.dw,     label: "2W", color: "rgba(255,255,255,0.9)" };
-    case "TL": return { bg: P.tl,     label: "3L", color: "rgba(255,255,255,0.9)" };
-    case "DL": return { bg: P.dl,     label: "2L", color: "rgba(255,255,255,0.9)" };
+    case "TW": return { bg: P.tw,     label: "TW", color: "rgba(255,255,255,0.9)" };
+    case "DW": return { bg: P.dw,     label: "DW", color: "rgba(255,255,255,0.9)" };
+    case "TL": return { bg: P.tl,     label: "TL", color: "rgba(255,255,255,0.9)" };
+    case "DL": return { bg: P.dl,     label: "DL", color: "rgba(255,255,255,0.9)" };
     case "ST": return { bg: P.dw,    label: "★",  color: "rgba(255,255,255,0.9)" };
     default:   return { bg: P.normal, label: "",   color: "transparent" };
   }
@@ -1083,11 +1083,11 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                     onDragStart={placedTile ? ()=>handleDragFromBoard(r,c) : undefined}
                   >
                     {permanentTile ? (
-                      <div style={{ width:CELL-4, height:CELL-4, background:lastMoveSquares.has(key)?"#E8F5E9":P.tile, borderRadius:3, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", border:`1px solid ${lastMoveSquares.has(key)?"#27AE60":P.tileEdge}`, boxShadow:lastMoveSquares.has(key)?`0 0 6px rgba(39,174,96,0.5), inset 0 1px 0 rgba(255,255,255,0.5)`:`inset 0 1px 0 rgba(255,255,255,0.5)` }}>
-                        <span style={{ fontSize:15, fontWeight:800, color:"#888", fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1, fontStyle:permanentTile==="_"?"italic":"normal" }}>
-                          {permanentTile==="_" ? (board[key+"_letter"]||"") : permanentTile}
+                      <div style={{ width:CELL-3, height:CELL-3, background:lastMoveSquares.has(key)?"#C8E6C9":"#F5E6B8", borderRadius:4, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", position:"relative", boxShadow:lastMoveSquares.has(key)?"inset 0 -2px 0 rgba(0,0,0,0.15), 0 0 0 1.5px #66BB6A":"inset 0 -2px 0 rgba(0,0,0,0.15)" }}>
+                        <span style={{ fontSize:16, fontWeight:900, color:"#2C1810", fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1, marginTop:2 }}>
+                          {permanentTile==="_" ? "" : permanentTile}
                         </span>
-                        <span style={{ fontSize:7, color:P.brown, lineHeight:1, fontWeight:700 }}>{TILE_VALUES[permanentTile]||""}</span>
+                        <span style={{ fontSize:7, color:"#5D3A1A", lineHeight:1, fontWeight:700, position:"absolute", bottom:2, right:3 }}>{TILE_VALUES[permanentTile]||""}</span>
                       </div>
                     ) : placedTile ? (
                       <div style={{ width:CELL-3, height:CELL-3, background:"#FFF8DC", borderRadius:4, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:"pointer", position:"relative", boxShadow:`0 0 0 2px ${wordStatus[key]?.valid===false?"#E21D38":P.gold}, inset 0 -2px 0 rgba(0,0,0,0.1)` }} onClick={()=>{ if(placedTile.letter==="_"&&!(placedTile.assignedLetter||blankAssignments[key])){ setBlankPicker({row:r,col:c}); return; } handleSquareClick(r,c); }}>
