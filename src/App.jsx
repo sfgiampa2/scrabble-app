@@ -1119,56 +1119,28 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
             )}
           </div>
           {lastMoveSquares.size > 0 && (() => {
-            const S = CELL + 2; // stride = cell + gap
-            const GAP = 2;
+            const S = CELL + 2;
             const PAD = 2;
-            // Each tile occupies [PAD + c*S, PAD + c*S + CELL] in x
-            // The border should sit in the GAP between tiles, not on the tile itself
-            // For exposed edges: draw line at the midpoint of the gap outside the tile
             const keys = [...lastMoveSquares];
-            const set = lastMoveSquares;
-            const edges = [];
-            keys.forEach(key => {
-              const [r,c] = key.split(",").map(Number);
-              const cx = PAD + c*S;
-              const cy = PAD + r*S;
-              const hasT = set.has(`${r-1},${c}`);
-              const hasB = set.has(`${r+1},${c}`);
-              const hasL = set.has(`${r},${c-1}`);
-              const hasR = set.has(`${r},${c+1}`);
-              const T = cy, B = cy+CELL, L = cx, R = cx+CELL;
-              const ext = GAP+1;
-              // Exposed edges — extend into gap when neighbor exists to bridge across gap
-              if (!hasT) edges.push([hasL?L-ext:L, T, hasR?R+ext:R, T]);
-              if (!hasB) edges.push([hasL?L-ext:L, B, hasR?R+ext:R, B]);
-              if (!hasL) edges.push([L, hasT?T-ext:T, L, hasB?B+ext:B]);
-              if (!hasR) edges.push([R, hasT?T-ext:T, R, hasB?B+ext:B]);
-              // Concave inner corners — fill the gap at inside bends of L-shapes
-              // Top-left inner corner: tile has top AND left neighbors but NOT top-left diagonal
-              if (hasT && hasL && !set.has(`${r-1},${c-1}`)) edges.push([L-ext, T-ext, L, T-ext]);
-              // Top-right inner corner
-              if (hasT && hasR && !set.has(`${r-1},${c+1}`)) edges.push([R, T-ext, R+ext, T-ext]);
-              // Bottom-left inner corner
-              if (hasB && hasL && !set.has(`${r+1},${c-1}`)) edges.push([L-ext, B+ext, L, B+ext]);
-              // Bottom-right inner corner
-              if (hasB && hasR && !set.has(`${r+1},${c+1}`)) edges.push([R, B+ext, R+ext, B+ext]);
-            });
             const rows = keys.map(k=>+k.split(",")[0]);
             const cols = keys.map(k=>+k.split(",")[1]);
-            const minR=Math.min(...rows), maxC=Math.max(...cols);
-            const bubbleX = PAD + (maxC+1)*S + 2;
-            const bubbleY = PAD + minR*S;
+            const minR=Math.min(...rows), maxR=Math.max(...rows);
+            const minC=Math.min(...cols), maxC=Math.max(...cols);
+            const x = PAD + minC*S;
+            const y = PAD + minR*S;
+            const w = (maxC-minC)*S + CELL;
+            const h = (maxR-minR)*S + CELL;
             const totalW = 15*S + PAD;
             const totalH = 15*S + PAD;
+            const bubbleX = x + w + 4;
+            const bubbleY = y;
             return (
               <svg style={{ position:"absolute", top:0, left:0, width:totalW, height:totalH, pointerEvents:"none", zIndex:5 }}>
-                {edges.map(([x1,y1,x2,y2],i) => (
-                  <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#3B5EC6" strokeWidth={2} strokeLinecap="square" />
-                ))}
+                <rect x={x} y={y} width={w} height={h} fill="none" stroke="#3B5EC6" strokeWidth={2.5} rx={3} />
                 {lastMoveScore !== null && (
                   <g>
-                    <rect x={bubbleX} y={bubbleY} width={36} height={20} rx={10} fill="#1D3163" />
-                    <text x={bubbleX+18} y={bubbleY+14} textAnchor="middle" fill="#fff" fontSize={11} fontWeight={800}>+{lastMoveScore}</text>
+                    <rect x={bubbleX} y={bubbleY} width={40} height={22} rx={11} fill="#1D3163" />
+                    <text x={bubbleX+20} y={bubbleY+15} textAnchor="middle" fill="#fff" fontSize={11} fontWeight={800}>+{lastMoveScore}</text>
                   </g>
                 )}
               </svg>
