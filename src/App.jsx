@@ -1066,7 +1066,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                 const canDrop = !permanentTile && !placedTile;
                 return (
                   <div key={key}
-                    style={{ width:CELL, height:CELL, background:permanentTile||placedTile?"#F5E6B8":sq.bg, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", position:"relative", fontSize:11, fontWeight:900, color:sq.color, borderRadius:3, transition:"all 0.15s",
+                    style={{ width:CELL, height:CELL, background:permanentTile||placedTile?"transparent":sq.bg, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", position:"relative", fontSize:11, fontWeight:900, color:sq.color, borderRadius:3, transition:"all 0.15s",
                       outline: placedTile ? `2px solid ${wordStatus[key]?.valid===true?"#27AE60":wordStatus[key]?.valid===false?"#E21D38":P.gold}` : "none",
                       boxShadow: placedTile && wordStatus[key]?.valid===true ? "0 0 8px rgba(39,174,96,0.4)" : placedTile && wordStatus[key]?.valid===false ? "0 0 8px rgba(226,29,56,0.4)" : placedTile ? `0 0 8px ${P.gold}44` : "none",
                       letterSpacing:-0.5 }}
@@ -1084,11 +1084,11 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                         <span style={{ fontSize:7, color:P.brown, lineHeight:1, fontWeight:700 }}>{TILE_VALUES[permanentTile]||""}</span>
                       </div>
                     ) : placedTile ? (
-                      <div style={{ width:CELL-4, height:CELL-4, background:"#FFF3CC", borderRadius:3, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:"pointer", border:`1px solid ${placedTile.letter==="_"&&!blankAssignments[key]?"#E21D38":P.gold}`, boxShadow:`inset 0 1px 0 rgba(255,255,255,0.7), 0 0 6px ${P.gold}66` }} onClick={()=>{ if(placedTile.letter==="_"&&!blankAssignments[key]){ setBlankPicker({row:r,col:c}); return; } handleSquareClick(r,c); }}>
-                        <span style={{ fontSize:15, fontWeight:800, color:placedTile.letter==="_"&&!(placedTile.assignedLetter||blankAssignments[key])?P.red:P.brown, fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1 }}>
+                      <div style={{ width:CELL-3, height:CELL-3, background:"#FFF8DC", borderRadius:4, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:"pointer", position:"relative", boxShadow:`0 0 0 2px ${wordStatus[key]?.valid===false?"#E21D38":P.gold}, inset 0 -2px 0 rgba(0,0,0,0.1)` }} onClick={()=>{ if(placedTile.letter==="_"&&!(placedTile.assignedLetter||blankAssignments[key])){ setBlankPicker({row:r,col:c}); return; } handleSquareClick(r,c); }}>
+                        <span style={{ fontSize:16, fontWeight:900, color:"#2C1810", fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1, marginTop:2 }}>
                           {placedTile.letter==="_" ? (placedTile.assignedLetter||blankAssignments[key]||"?") : placedTile.letter}
                         </span>
-                        <span style={{ fontSize:7, color:P.brown, lineHeight:1, fontWeight:700 }}>{placedTile.letter==="_"?"0":TILE_VALUES[placedTile.letter]||""}</span>
+                        <span style={{ fontSize:7, color:"#5D3A1A", lineHeight:1, fontWeight:700, position:"absolute", bottom:2, right:3 }}>{placedTile.letter==="_"?"0":TILE_VALUES[placedTile.letter]||""}</span>
                       </div>
                     ) : (
                       <span style={{ fontSize:11, color:sq.color, fontWeight:900, letterSpacing:-0.5 }}>{sq.label}</span>
