@@ -458,6 +458,7 @@ function JoinView({ gameId: initialGameId, onJoin, loading }) {
           onClick={doJoin} disabled={loading||(!code&&!initialGameId)}>
           {loading ? "Joining…" : "Join Game"}
         </button>
+        <button style={{ ...styles.btnSecondary, width:"100%", marginTop:8 }} onClick={()=>window.history.back()}>← Back</button>
       </div>
     </div>
   );
@@ -886,7 +887,12 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
     const score = calculateScore();
     // Update board
     const newBoard = { ...board };
-    Object.entries(placed).forEach(([key,t]) => { newBoard[key] = t.letter==="_" ? (t.assignedLetter||blankAssignments[key]||"A") : t.letter; });
+    Object.entries(placed).forEach(([key,t]) => {
+      if (t.letter==="_") {
+        newBoard[key] = t.assignedLetter||blankAssignments[key]||"A";
+        newBoard[key+"_blank"] = true;
+      } else { newBoard[key] = t.letter; }
+    });
     // Draw new tiles
     const { data: gameData } = await supabase.from("games").select("bag").eq("id",gameId).single();
     const bag = gameData?.bag || [];
@@ -1007,6 +1013,19 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
         </div>
       )}
 
+      {/* Pass confirm */}
+      {showPassConfirm && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:200 }}>
+          <div style={{ background:P.surface, border:`1px solid ${P.border}`, borderRadius:16, padding:28, maxWidth:300, textAlign:"center" }}>
+            <div style={{ fontSize:18, fontWeight:700, color:P.text, marginBottom:8 }}>Pass your turn?</div>
+            <div style={{ fontSize:14, color:P.muted, marginBottom:24 }}>You won't place any tiles this turn.</div>
+            <div style={{ display:"flex", gap:8, justifyContent:"center" }}>
+              <button style={styles.btnSecondary} onClick={()=>setShowPassConfirm(false)}>Cancel</button>
+              <button style={styles.btnPrimary} onClick={()=>{ setShowPassConfirm(false); passTurn(); }}>Pass Turn</button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Resign confirm modal */}
       {showResign && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.7)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:100 }}>
@@ -1056,9 +1075,9 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:4 }}>
             {"ABCDEFGHIJKLMNOPQRSTUVWXYZ_".split("").map(l => (
-              <div key={l} style={{ background:bagCounts[l]>0?"rgba(255,255,255,0.07)":"rgba(255,255,255,0.02)", border:`1px solid ${bagCounts[l]>0?P.border:"rgba(255,255,255,0.03)"}`, borderRadius:5, padding:"4px 2px", textAlign:"center", opacity:bagCounts[l]>0?1:0.3 }}>
-                <div style={{ fontSize:11, fontWeight:800, color:bagCounts[l]>0?P.text:P.muted, fontFamily:"'Segoe UI', sans-serif" }}>{l}</div>
-                <div style={{ fontSize:10, color:P.gold, fontWeight:700 }}>{bagCounts[l]}</div>
+              <div key={l} style={{ width:24, height:24, background:bagCounts[l]>0?"#F5E6B8":"rgba(0,0,0,0.06)", borderRadius:4, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", position:"relative", boxShadow:bagCounts[l]>0?"inset 0 -1px 0 rgba(0,0,0,0.2)":"none", opacity:bagCounts[l]>0?1:0.25 }}>
+                <div style={{ fontSize:11, fontWeight:900, color:"#2C1810", lineHeight:1 }}>{l==="_"?"★":l}</div>
+                <div style={{ fontSize:7, color:"#5D3A1A", fontWeight:700, position:"absolute", bottom:1, right:2 }}>{bagCounts[l]}</div>
               </div>
             ))}
           </div>
@@ -1105,7 +1124,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                 const canDrop = !permanentTile && !placedTile;
                 return (
                   <div key={key}
-                    style={{ width:CELL, height:CELL, background:permanentTile||placedTile?"transparent":sq.bg, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", position:"relative", fontSize:11, fontWeight:900, color:sq.color, borderRadius:3, transition:"all 0.15s",
+                    style={{ width:CELL, height:CELL, background:sq.bg, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", position:"relative", fontSize:11, fontWeight:900, color:sq.color, borderRadius:3, transition:"all 0.15s",
                       outline: placedTile ? `2px solid ${wordStatus[key]?.valid===true?"#27AE60":wordStatus[key]?.valid===false?"#E21D38":P.gold}` : "none",
                       boxShadow: placedTile && wordStatus[key]?.valid===true ? "0 0 8px rgba(39,174,96,0.4)" : placedTile && wordStatus[key]?.valid===false ? "0 0 8px rgba(226,29,56,0.4)" : placedTile ? `0 0 8px ${P.gold}44` : "none",
                       letterSpacing:-0.5 }}
@@ -1116,11 +1135,11 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                     onDragStart={placedTile ? ()=>handleDragFromBoard(r,c) : undefined}
                   >
                     {permanentTile ? (
-                      <div style={{ width:CELL-3, height:CELL-3, background:"#F5E6B8", borderRadius:4, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", position:"relative", boxShadow:"inset 0 -2px 0 rgba(0,0,0,0.15)" }}>
+                      <div style={{ width:CELL-2, height:CELL-2, background:"#F5E6B8", borderRadius:3, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", position:"relative", boxShadow:"inset 0 -2px 0 rgba(0,0,0,0.15)" }}>
                         <span style={{ fontSize:16, fontWeight:900, color:"#2C1810", fontFamily:"'Segoe UI', Arial, sans-serif", lineHeight:1, marginTop:2 }}>
                           {permanentTile==="_" ? "" : permanentTile}
                         </span>
-                        <span style={{ fontSize:7, color:"#5D3A1A", lineHeight:1, fontWeight:700, position:"absolute", bottom:2, right:3 }}>{TILE_VALUES[permanentTile]||""}</span>
+                        <span style={{ fontSize:7, color:"#5D3A1A", lineHeight:1, fontWeight:700, position:"absolute", bottom:2, right:3 }}>{board[key+"_blank"]?"0":TILE_VALUES[permanentTile]||""}</span>
                       </div>
                     ) : placedTile ? (
                       <div style={{ width:CELL-3, height:CELL-3, background:"#FFF8DC", borderRadius:4, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:"pointer", position:"relative", boxShadow:`0 0 0 2px ${wordStatus[key]?.valid===false?"#E21D38":P.gold}, inset 0 -2px 0 rgba(0,0,0,0.1)` }} onClick={()=>{ if(placedTile.letter==="_"&&!(placedTile.assignedLetter||blankAssignments[key])){ setBlankPicker({row:r,col:c}); return; } handleSquareClick(r,c); }}>
@@ -1158,12 +1177,10 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
                   const wh = (maxR-minR)*S + CELL;
                   return <rect key={wi} x={x} y={y} width={ww} height={wh} fill="none" stroke="#3B5EC6" strokeWidth={2.5} rx={3} />;
                 })}
-                {lastMoveScore !== null && (
-                  <g>
-                    <rect x={bubbleX} y={bubbleY} width={40} height={22} rx={11} fill="#1D3163" />
-                    <text x={bubbleX+20} y={bubbleY+15} textAnchor="middle" fill="#fff" fontSize={11} fontWeight={800}>+{lastMoveScore}</text>
-                  </g>
-                )}
+                {lastMoveScore !== null && (() => {
+                  const BW=44, safeX=bubbleX+BW>totalW-4?bubbleX-BW-8:bubbleX;
+                  return <g><rect x={safeX} y={bubbleY} width={BW} height={22} rx={11} fill="#1D3163"/><text x={safeX+BW/2} y={bubbleY+15} textAnchor="middle" fill="#fff" fontSize={11} fontWeight={800}>+{lastMoveScore}</text></g>;
+                })()}
               </svg>
             );
           })()}
@@ -1300,7 +1317,7 @@ function MoveHistory({ gameId, players, compact }) {
           {m.move_type==="play" && <span style={{ color:"#27AE60", fontWeight:800, fontSize:12 }}>+{m.score}</span>}
         </div>
         {m.move_type==="play" && (
-          <div style={{ display:"flex", flexWrap:"wrap", gap:3, paddingLeft:14 }}>
+          <div style={{ display:"flex", flexDirection:"column", gap:3, paddingLeft:14 }}>
             {(m.words_formed||[]).map((word,wi) => (
               <div key={wi} style={{ display:"flex", gap:1 }}>
                 {word.split("").map((letter,li) => (
