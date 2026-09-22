@@ -573,17 +573,23 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
 
   // Validate words as tiles are placed
   useEffect(() => {
-    if (Object.keys(placed).length === 0) { setWordStatus({}); return; }
+    if (Object.keys(placed).length === 0) { setWordStatus({}); setWordValidations([]); return; }
+    const unassigned = Object.entries(placed).filter(([k,t]) => t.letter==="_" && !blankAssignments[k] && !t.assignedLetter);
+    if (unassigned.length > 0) { setWordStatus({}); setWordValidations([]); return; }
     const words = getPlacedWords();
-    if (words.length === 0) return;
-    const statusMap = {};
+    if (words.length === 0) { setWordValidations([]); return; }
+    const totalScore = calculateScore();
     Promise.all(words.map(async ({ word, squares }) => {
       const valid = await isValidWord(word);
-      const score = calculateScore();
-      squares.forEach(({ r, c }) => {
-        statusMap[`${r},${c}`] = { valid, word, score };
+      return { word, squares, valid, score: totalScore };
+    })).then(results => {
+      setWordValidations(results);
+      const statusMap = {};
+      results.forEach(({ squares, valid }) => {
+        squares.forEach(({ r, c }) => { statusMap[`${r},${c}`] = { valid }; });
       });
-    })).then(() => setWordStatus(statusMap));
+      setWordStatus(statusMap);
+    });
   }, [placed, blankAssignments]);
 
   // Track last move for highlighting
