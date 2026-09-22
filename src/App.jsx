@@ -594,15 +594,18 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
 
   // Track last move for highlighting
   const [lastMoveSquares, setLastMoveSquares] = useState(new Set());
+  const [lastMoveScore, setLastMoveScore] = useState(null);
+  const [lastMovePlayer, setLastMovePlayer] = useState(null);
 
   // Sync board from game
   useEffect(() => {
     if (game.board) {
-      // Find new squares vs previous board
-      const newSquares = new Set();
-      Object.keys(game.board).forEach(k => { if (!board[k]) newSquares.add(k); });
-      if (newSquares.size > 0) setLastMoveSquares(newSquares);
       setBoard(game.board);
+    }
+    if (game.last_move?.squares) {
+      setLastMoveSquares(new Set(game.last_move.squares));
+      setLastMoveScore(game.last_move.score);
+      setLastMovePlayer(game.last_move.player);
     }
     if (game.status === "finished") setGameOver(true);
     // Sync scores
