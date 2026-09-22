@@ -1136,16 +1136,17 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
               const hasB = set.has(`${r+1},${c}`);
               const hasL = set.has(`${r},${c-1}`);
               const hasR = set.has(`${r},${c+1}`);
-              // Line sits 1px outside the tile (in the gap)
-              const T = cy - 1;         // top border y
-              const B = cy + CELL + 1;  // bottom border y
-              const L = cx - 1;         // left border x
-              const R = cx + CELL + 1;  // right border x
-              // Horizontal segments extend to meet corners
-              const x0 = hasL ? cx - GAP/2 - 1 : L;
-              const x1 = hasR ? cx + CELL + GAP/2 + 1 : R;
-              const y0 = hasT ? cy - GAP/2 - 1 : T;
-              const y1 = hasB ? cy + CELL + GAP/2 + 1 : B;
+              // Border sits exactly on tile edge
+              const T = cy;             // top
+              const B = cy + CELL;      // bottom
+              const L = cx;             // left
+              const R = cx + CELL;      // right
+              // Extend into gap to connect with adjacent tile borders
+              const ext = GAP + 1;
+              const x0 = hasL ? cx - ext : L;
+              const x1 = hasR ? cx + CELL + ext : R;
+              const y0 = hasT ? cy - ext : T;
+              const y1 = hasB ? cy + CELL + ext : B;
               if (!hasT) edges.push([x0, T, x1, T]);
               if (!hasB) edges.push([x0, B, x1, B]);
               if (!hasL) edges.push([L, y0, L, y1]);
@@ -1161,7 +1162,7 @@ function GameBoard({ game, players, myPlayer, gameId, notify, onBack }) {
             return (
               <svg style={{ position:"absolute", top:0, left:0, width:totalW, height:totalH, pointerEvents:"none", zIndex:5 }}>
                 {edges.map(([x1,y1,x2,y2],i) => (
-                  <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#3B5EC6" strokeWidth={3} strokeLinecap="round" />
+                  <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#3B5EC6" strokeWidth={2} strokeLinecap="square" />
                 ))}
                 {lastMoveScore !== null && (
                   <g>
